@@ -1,10 +1,11 @@
 import os
 import json
 import uuid
-from typing import Literal, Optional
+from typing import Optional
+import datetime
 from urllib.request import urlopen
 import app.app_config as _  # forcer le sys.path side effect
-from app.classes import RFPipeline, NNPipeline
+from app.classes import RFPipeline, NNPipeline, AffluenceClassifierPipeline
 
 
 
@@ -12,13 +13,16 @@ def update_summary(
     summary_path: str,
     model_type: str,
     run_id: str,
-    rmse: float,
-    r2: float,
     model_uri: str,
     env: str = "prod",
-    test_mode: bool = False
+    test_mode: bool = False,
+    rmse: float = None,
+    r2: float = None,
+    accuracy: float = None,
+    precision: float = None,
+    recall: float = None,
+    f1_score: float = None
 ):
-    import datetime
 
     entry = {
         "timestamp": datetime.datetime.utcnow().isoformat(),
@@ -26,10 +30,16 @@ def update_summary(
         "env": env,
         "test_mode": test_mode,
         "run_id": run_id,
-        "rmse": rmse,
-        "r2": r2,
-        "model_uri": model_uri
+        "model_uri": model_uri,
     }
+
+    # Ajoute les métriques si elles sont fournies
+    if rmse is not None: entry["rmse"] = rmse
+    if r2 is not None: entry["r2"] = r2
+    if accuracy is not None: entry["accuracy"] = accuracy
+    if precision is not None: entry["precision"] = precision
+    if recall is not None: entry["recall"] = recall
+    if f1_score is not None: entry["f1_score"] = f1_score
 
     # Déterminer le chemin local
     summary_path_local = "/tmp/summary.json" if summary_path.startswith("gs://") else summary_path
@@ -46,15 +56,15 @@ def update_summary(
                 print("⚠️ summary.json vide ou corrompu. Réinitialisation.")
                 summary = []
 
-    # ⛔ Supprimer anciens du même type/env/test_mode
-    summary = [
-        s for s in summary
-        if not (
-            s["model_type"] == model_type
-            and s["env"] == env
-            and s["test_mode"] == test_mode
-        )
-    ]
+    ## ⛔ Supprimer anciens du même type/env/test_mode
+    #summary = [
+    #    s for s in summary
+    #    if not (
+    #        s["model_type"] == model_type
+    #        and s["env"] == env
+    #        and s["test_mode"] == test_mode
+    #    )
+    #]
 
     summary.append(entry)
 
@@ -72,8 +82,8 @@ def get_best_model_from_summary(
     model_type: str,
     summary_path: str,
     env: str = "prod",
-    metric: Literal["rmse", "r2"] = "rmse",
-    test_mode: Optional[bool] = False
+    metric: str = "rmse",
+    test_mode: Optional[bool] = False # True pour test, False pour prod
 ):
     if summary_path.startswith("gs://"):
         summary = _read_gcs_json(summary_path)
@@ -95,22 +105,43 @@ def get_best_model_from_summary(
     if not filtered:
         raise RuntimeError(f"Aucun modèle trouvé pour type={model_type}, env={env}, test_mode={test_mode}")
 
-    # Tri combiné : r2 décroissant puis rmse croissant
-    best = max(filtered, key=lambda r: (r["r2"], -r["rmse"]))
+    metric_sorting = {
+        "rmse": lambda r: -r["rmse"],
+        "r2": lambda r: r["r2"],
+        "f1_score": lambda r: r.get("f1_score", -1),
+        "accuracy": lambda r: r.get("accuracy", -1)
+    }
 
-    print(f"✅ Modèle {model_type} sélectionné : {best['run_id']} (r2={best['r2']}, rmse={best['rmse']})")
+    if metric not in metric_sorting:
+        raise ValueError(f"Métrique non supportée : {metric}")
+
+    best = max(filtered, key=metric_sorting[metric])
+    print(f"🔍 Résumé sélectionné:\n{json.dumps(best, indent=2)}")
+    print(f"📁 Téléchargement depuis GCS : {best['model_uri']}")
+
+
+    value = best.get(metric, "N/A")
+    print(f"✅ Modèle {model_type} sélectionné : {best.get('run_id', 'N/A')} ({metric}={value})")
 
     local_model_path = _download_gcs_dir(best["model_uri"], prefix=model_type)
 
-    # 💡 Si un sous-dossier "rf" ou "nn" existe à l'intérieur, on l'utilise
+    # 🔎 Recherche automatique du sous-dossier portant le nom du modèle (ex: rf_class)
     subfolder = os.path.join(local_model_path, model_type)
     if os.path.isdir(subfolder):
+        print(f"📁 Sous-dossier détecté pour {model_type}, on l'utilise : {subfolder}")
         local_model_path = subfolder
+    else:
+        print(f"⚠️ Aucun sous-dossier {model_type} trouvé dans {local_model_path}")
+        print(f"📂 Contenu détecté : {os.listdir(local_model_path)}")
+
+
 
     if model_type == "rf":
         return RFPipeline.load(local_model_path)
     elif model_type == "nn":
         return NNPipeline.load(local_model_path)
+    elif model_type == "rf_class":
+        return AffluenceClassifierPipeline.load(local_model_path)
     else:
         raise ValueError("Type de modèle non reconnu")
 
@@ -126,11 +157,27 @@ def _download_gcs_dir(gcs_uri: str, prefix="model") -> str:
     client = storage.Client()
     blobs = list(client.list_blobs(bucket_name, prefix=path))
 
+    print(f"📂 GCS path to download: {gcs_uri}")
+    print(f"📥 Destination locale: {local_tmp_dir}")
+
     for blob in blobs:
         rel_path = os.path.relpath(blob.name, path)
+
+        # ⛔ Ignore les "blobs de répertoire"
+        if rel_path in (".", "") or blob.name.endswith("/"):
+            print(f"🚫 Blob ignoré (répertoire ou vide) : {blob.name}")
+            continue
+
         local_file = os.path.join(local_tmp_dir, rel_path)
         os.makedirs(os.path.dirname(local_file), exist_ok=True)
-        blob.download_to_filename(local_file)
+
+        try:
+            blob.download_to_filename(local_file)
+            print(f"➡️ Fichier local : {local_file}")
+        except Exception as e:
+            print(f"💥 Échec téléchargement : {blob.name}")
+            print(f"❌ Exception : {e}")
+            raise
 
     return local_tmp_dir
 

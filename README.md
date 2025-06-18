@@ -107,6 +107,10 @@ source .venv/bin/activate
 ### Training
 
 ```bash
+
+# avant tout
+GOOGLE_APPLICATION_CREDENTIALS=./mlflow-trainer.json
+
 # Fast dev run
 python app/train.py --env dev --model_test
 
@@ -121,19 +125,40 @@ streamlit run app/streamlit_app.py
 
 ## 📺 (Optional) MLflow Tracking UI
 
+### In DEV
 ```bash
 # Create artifact path
-mkdir -p mlruns/artifacts
+mkdir -p mlruns_dev/artifacts
 
 # Use GCP key for UI access
 export GOOGLE_APPLICATION_CREDENTIALS=./mlflow-ui-access.json
 
-# Launch UI server
+# Launch UI server in DEV
+
 mlflow server \
-  --backend-store-uri file:./mlruns \
-  --default-artifact-root gs://df_traffic_cyclist1/mlruns \ # you can change it for your local path, if you dont want to use GCP
+  --backend-store-uri file:./mlruns_dev \
+  --default-artifact-root file:./mlruns_dev/artifacts \
   --host 127.0.0.1 \
   --port 5000
+```
+
+### In PROD
+
+```bash
+# Create artifact path
+mkdir -p mlruns_prod/artifacts
+
+# Use GCP key for UI access
+export GOOGLE_APPLICATION_CREDENTIALS=./mlflow-ui-access.json
+
+# Launch UI server in PROD
+mlflow server \
+  --backend-store-uri file:./mlruns_prod \
+  --default-artifact-root gs://df_traffic_cyclist1/mlruns \
+  --serve-artifacts \
+  --host 127.0.0.1 \
+  --port 5000
+
 ```
 
 ---
