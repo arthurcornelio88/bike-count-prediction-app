@@ -14,13 +14,22 @@ import numpy as np
 import app.app_config as _  # forcer le sys.path side effect
 from app.model_registry_summary import get_best_model_from_summary
 
+def get_secret(key, default=None):
+    try:
+        return st.secrets[key]
+    except Exception:
+        return os.getenv(key, default)
 
+env = get_secret("env", "DEV").upper()
+gcp_raw = get_secret("gcp_service_account") or get_secret("GCP_SERVICE_ACCOUNT")
 
-# === Initialisation GCP (si secrets présents) ===
-if "gcp_service_account" in st.secrets:
+if gcp_raw and env == "PROD":
+    gcp_dict = json.loads(gcp_raw) if isinstance(gcp_raw, str) else dict(gcp_raw)
     with open("/tmp/gcp.json", "w") as f:
-        json.dump(dict(st.secrets["gcp_service_account"]), f)
+        json.dump(gcp_dict, f)
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/gcp.json"
+elif env == "DEV":
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./gcp.json"
 
 # === Fonction de chargement dynamique des modèles via summary.json ===
 def fetch_best_pipeline(model_type: str):
