@@ -78,8 +78,12 @@ Paste your service account JSON into Streamlit secrets:
 
 ```toml
 [gcp_service_account]
-# Paste your full service account JSON key here
+# Paste your full service account JSON key here (see )
+[env]
+ENV="PROD"
 ```
+
+> More on how to configure it? [Go to GCP setup](#-gcp-service-accounts-setup).
 
 ✅ Done. Streamlit now:
 
@@ -109,7 +113,7 @@ python app/train.py --env dev --model_test
 # Full training + GCS upload
 python app/train.py --env prod
 
-# For dev purposes, in prod, see Streamlit Cloud section
+# For dev purposes. If you're in prod, see Streamlit Cloud section
 streamlit run app/streamlit_app.py
 ```
 
@@ -127,7 +131,7 @@ export GOOGLE_APPLICATION_CREDENTIALS=./mlflow-ui-access.json
 # Launch UI server
 mlflow server \
   --backend-store-uri file:./mlruns \
-  --default-artifact-root gs://df_traffic_cyclist1/mlruns \
+  --default-artifact-root gs://df_traffic_cyclist1/mlruns \ # you can change it for your local path, if you dont want to use GCP
   --host 127.0.0.1 \
   --port 5000
 ```
@@ -144,7 +148,18 @@ This project uses **three GCP service accounts** to separate roles cleanly:
 | `mlflow-ui-access`    | `Storage Object Viewer` | Accessing MLflow UI in prod   |
 | `gcp_service_account` | `Storage Object Viewer` | Streamlit app model inference |
 
-### Setup Instructions
+### DEV: Create and .env file
+
+In root from your repo, with this structure:
+
+```
+ENV=DEV
+GCP_SERVICE_ACCOUNT=./gcp.json
+```
+
+> And, if you're using MLFlow in a semi-prod mode, you'll need `mlflow-ui-access.json` and `mlflow-trainer.json` in root too.  
+
+### PROD: Setup Instructions
 
 1. Go to [IAM → Service Accounts](https://console.cloud.google.com/iam-admin/serviceaccounts)
 2. Create each account and assign roles
