@@ -2,7 +2,6 @@
 import numpy as np
 import pandas as pd
 import joblib
-import os
 from sklearn.pipeline import Pipeline
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import LabelEncoder, StandardScaler
@@ -12,7 +11,15 @@ from tensorflow.keras.callbacks import EarlyStopping
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import RandomForestRegressor
+from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
+from sklearn.metrics import (
+    confusion_matrix, classification_report, accuracy_score,
+    precision_score, recall_score, f1_score
+)
+from sklearn.model_selection import train_test_split
+import json
+import os
+from datetime import datetime
 import app.app_config as _  # forcer le sys.path side effect
  
 
@@ -96,6 +103,113 @@ class TimeFeatureTransformer(BaseEstimator, TransformerMixin):
         X['mois_cos'] = np.cos(2 * np.pi * X['mois'] / 12)
         X['annee'] = X['annee'].map({2024: 0, 2025: 1})
         return X.drop(columns=['heure', 'mois'])
+
+class AffluenceLabeler(BaseEstimator, TransformerMixin):
+    def __init__(self, threshold="mean"):
+        self.threshold = threshold
+
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X):
+        X = X.copy()
+        if "comptage_horaire" not in X.columns:
+            print("⚠️ Skip AffluenceLabeler: 'comptage_horaire' not found.")
+            return X  # Ne rien faire si la target n’est pas là
+
+        X["affluence"] = 0
+        for compteur in X["nom_du_compteur"].unique():
+            serie = X[X["nom_du_compteur"] == compteur]["comptage_horaire"]
+            seuil = serie.mean() if self.threshold == "mean" else serie.median()
+            X.loc[
+                (X["nom_du_compteur"] == compteur) & (X["comptage_horaire"] > seuil),
+                "affluence"
+            ] = 1
+        return X
+
+
+# AffluenceClassifierPipeline — pipeline complet
+class AffluenceClassifierPipeline:
+    def __init__(self):
+        self.cleaner = None
+        self.label_encoder = LabelEncoder()
+        self.model = RandomForestClassifier(n_estimators=100, random_state=42)
+        self.features = ["heure", "jour_mois", "mois", "jour_semaine", "annee", "compteur_id"]
+
+    def _prepare_features(self, df, fit=True):
+        df = df.copy()
+        df.columns = df.columns.str.lower()
+
+        # Encodage du compteur
+        if fit:
+            df["compteur_id"] = self.label_encoder.fit_transform(df["nom_du_compteur"])
+        else:
+            df["compteur_id"] = self.label_encoder.transform(df["nom_du_compteur"])
+
+        return df[self.features], df["affluence"] if "affluence" in df else None
+
+    def fit(self, df_raw):
+        self.cleaner = Pipeline([
+            ("raw", RawCleanerTransformer(keep_compteur=True)),
+            ("label", AffluenceLabeler())
+        ])
+        df_clean = self.cleaner.fit_transform(df_raw)
+
+        X, y = self._prepare_features(df_clean, fit=True)
+        self.X_train, self.X_test, self.y_train, self.y_test = train_test_split(
+            X, y, test_size=0.2, stratify=y, random_state=42
+        )
+        self.model.fit(self.X_train, self.y_train)
+
+    def evaluate(self):
+        y_pred = self.model.predict(self.X_test)
+        print("✅ Confusion Matrix\n", confusion_matrix(self.y_test, y_pred))
+        print("✅ Classification Report\n", classification_report(self.y_test, y_pred))
+        return {
+            "accuracy": accuracy_score(self.y_test, y_pred),
+            "precision": precision_score(self.y_test, y_pred),
+            "recall": recall_score(self.y_test, y_pred),
+            "f1_score": f1_score(self.y_test, y_pred)
+        }
+
+    def predict(self, df_raw):
+        cleaner_predict = Pipeline([
+            ("raw", RawCleanerTransformer(keep_compteur=True)),
+            # pas de ("label", ...) ici
+        ])
+        df_clean = cleaner_predict.transform(df_raw)
+
+        X, _ = self._prepare_features(df_clean, fit=False)
+        return self.model.predict(X)
+
+
+    def save(self, dir_path="affluence_rf_prod"):
+        os.makedirs(dir_path, exist_ok=True)
+        joblib.dump(self.cleaner, os.path.join(dir_path, "cleaner.joblib"))
+        joblib.dump(self.label_encoder, os.path.join(dir_path, "label_encoder.joblib"))
+        joblib.dump(self.model, os.path.join(dir_path, "model.joblib"))
+
+        scores = self.evaluate()
+        summary = {
+            "timestamp": datetime.now().isoformat(),
+            "model_type": "rf_class",
+            "env": "prod",
+            "test_mode": False,
+            **{k: round(v, 4) for k, v in scores.items()}
+        }
+        with open(os.path.join(dir_path, "model_summary.json"), "w") as f:
+            json.dump(summary, f, indent=4)
+
+        print("✅ Modèle et artefacts sauvegardés.")
+
+    @classmethod
+    def load(cls, dir_path):
+        instance = cls()
+        instance.cleaner = joblib.load(os.path.join(dir_path, "cleaner.joblib"))
+        instance.label_encoder = joblib.load(os.path.join(dir_path, "label_encoder.joblib"))
+        instance.model = joblib.load(os.path.join(dir_path, "model.joblib"))
+        return instance
+
 
 ## NN class
 

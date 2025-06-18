@@ -32,37 +32,47 @@ elif env == "DEV":
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./gcp.json"
 
 # === Fonction de chargement dynamique des modèles via summary.json ===
-def fetch_best_pipeline(model_type: str):
+def fetch_best_pipeline(model_type: str, metric: str = "r2"):
     print("📦 Chargement de get_best_model_from_summary depuis model_registry_summary.py")
     return get_best_model_from_summary(
         model_type=model_type,
         summary_path="gs://df_traffic_cyclist1/models/summary.json",
-        metric="r2",
+        metric=metric,
         env="prod",
     )
 
 @st.cache_resource
-def load_best_pipeline(model_type: str):
-    return fetch_best_pipeline(model_type)
+def load_best_pipeline(model_type: str, metric: str = "r2"):
+    return fetch_best_pipeline(model_type, metric)
 
 # Chargement des pipelines
-rf_pipeline = load_best_pipeline("rf")
+rf_pipeline = load_best_pipeline("rf", "r2")
 # st.write("✅ Random Forest chargé :", type(rf_pipeline)) # DEBUG
 st.write("✅ Random Forest chargé !")
 
-nn_pipeline = load_best_pipeline("nn")
+nn_pipeline = load_best_pipeline("nn", "r2")
 # st.write("✅ Neural Net chargé !", type(nn_pipeline)) # DEBUG
 st.write("✅ Neural Net chargé !")
+
+affluence_pipeline = load_best_pipeline("rf_class", "f1_score")
+st.write("✅ RF Classifier (Affluence) chargé !")
+
 
 # === UI ===
 st.sidebar.title("🧭 Navigation")
 page = st.sidebar.selectbox("Choisissez une page :", ["🔍 Prédiction exemple", "📂 Prédiction CSV batch"])
 st.title("🚲 Prédiction du comptage horaire de vélos")
-modele = st.radio("Modèle à utiliser :", ["Random Forest", "Réseau de Neurones"])
+modele = st.radio("Modèle à utiliser :", ["Random Forest", "Réseau de Neurones", "RF Classifier (Affluence)"])
 
 # Fonction utilitaire pour obtenir le bon pipeline
 def get_pipeline(name: str):
-    return rf_pipeline if name == "Random Forest" else nn_pipeline
+    if name == "Random Forest":
+        return rf_pipeline
+    elif name == "Réseau de Neurones":
+        return nn_pipeline
+    elif name == "RF Classifier (Affluence)":
+        return affluence_pipeline
+
 
 # === Exemples manuels
 raw_samples = [
@@ -93,13 +103,19 @@ if page == "🔍 Prédiction exemple":
     pipeline = get_pipeline(modele)
 
     try:
-        pred = pipeline.predict_clean(sample_df)[0]
+        if modele == "RF Classifier (Affluence)":
+            pred = pipeline.predict(sample_df)[0]
+            str_pred = "📊 Affluence détectée ✅" if pred == 1 else "📉 Faible fréquentation attendue"
+        else:
+            pred = pipeline.predict_clean(sample_df)[0]
+            str_pred = f"🧾 Prédiction du comptage horaire : **{round(float(pred))} vélos**"
+
         if isinstance(pred, (list, np.ndarray)) and isinstance(pred[0], (list, np.ndarray)):
             pred = pred[0]
 
         st.markdown("### 🔍 Observation sélectionnée")
         st.json(raw_samples[idx])
-        st.success(f"🧾 Prédiction du comptage horaire : **{round(float(pred))} vélos**")
+        st.success(str_pred)
 
     except Exception as e:
         st.error("Erreur lors de la prédiction :")
