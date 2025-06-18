@@ -196,5 +196,5 @@ mlruns/                        # Optional MLflow UI
 Built with ❤️ by:
 
 * [Arthur Cornélio](https://github.com/arthurcornelio88)
-* [Ibtihel Nemri]()
-* [Bruno Happi]()
+* [Ibtihel Nemri](https://github.com/ibtihelnemri)
+* [Bruno Happi](https://github.com/brunoCo-de)
