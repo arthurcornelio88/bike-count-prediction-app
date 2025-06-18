@@ -20,7 +20,7 @@ def get_secret(key, default=None):
     except Exception:
         return os.getenv(key, default)
 
-env = get_secret("env", "DEV").upper()
+env = get_secret("env", "DEV")
 gcp_raw = get_secret("gcp_service_account") or get_secret("GCP_SERVICE_ACCOUNT")
 
 if gcp_raw and env == "PROD":
