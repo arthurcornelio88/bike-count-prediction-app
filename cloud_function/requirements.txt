@@ -1,9 +1,9 @@
-scikit-learn
 joblib
 google-auth
-tensorflow
-fastapi==0.75.0
-uvicorn==0.17.6
-pandas==1.4.2
 google-cloud-storage==2.3.0
-pydantic==1.9.0
+pydantic>=2.0.0 
+pandas>=2.2.3
+scikit-learn>=1.6.1
+tensorflow-cpu>=2.13.0
+uvicorn>=0.34.2
+fastapi>=0.102.0

@@ -13,3 +13,6 @@ gcloud beta functions deploy predict_api_v3 \
   datascientest-460618
 
 gcloud functions describe predict_api_v3 --region=europe-west1
+
+docker build -t my_model_api .
+docker run -p 8080:8080 my_model_api
