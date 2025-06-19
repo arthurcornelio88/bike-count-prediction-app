@@ -14,41 +14,21 @@ import numpy as np
 import app.app_config as _  # forcer le sys.path side effect
 from app.model_registry_summary import get_best_model_from_summary
 
-def get_secret(key, default=None):
-    try:
-        # supporte des secrets à deux niveaux (ex: [env] env = "PROD")
-        return st.secrets[key] if key in st.secrets else os.getenv(key, default)
-    except Exception:
-        return os.getenv(key, default)
+import streamlit as st
+import os
+import json
 
-env = get_secret("env")
+import os, json
+import streamlit as st
 
-# GCP credentials : supporte TOML (dict) ou string (env var)
-gcp_raw = get_secret("gcp_service_account") or get_secret("GCP_SERVICE_ACCOUNT")
-
-if env == "PROD":
-    if not gcp_raw:
-        raise RuntimeError("❌ GCP credentials manquants pour PROD")
-
-    try:
-        gcp_dict = json.loads(gcp_raw) if isinstance(gcp_raw, str) else dict(gcp_raw)
-    except Exception as e:
-        raise RuntimeError(f"❌ Erreur parsing GCP credentials : {e}")
-
+try:
+    gcp_secret = st.secrets["gcp_service_account"]
     with open("/tmp/gcp.json", "w") as f:
-        json.dump(gcp_dict, f)
-
+        json.dump(dict(gcp_secret), f)
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/gcp.json"
-    print("✅ GCP credentials configurés pour Streamlit Cloud")
-
-else:
-    # DEV fallback
-    local_cred_path = "./gcp.json"
-    if not os.path.exists(local_cred_path):
-        raise RuntimeError("❌ ./gcp.json non trouvé en DEV")
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = local_cred_path
-    print("✅ GCP credentials configurés pour DEV")
-
+    print("✅ GCP credentials configurés via Streamlit secrets")
+except Exception as e:
+    raise RuntimeError("❌ Credentials GCP manquants dans st.secrets et aucun fallback n’est prévu.")
 
 # === Fonction de chargement dynamique des modèles via summary.json ===
 def fetch_best_pipeline(model_type: str, metric: str = "r2"):
