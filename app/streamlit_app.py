@@ -12,8 +12,8 @@ if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
 # === Configuration ===
-API_URL = st.secrets["api_url"]          # ok
-ENV = st.secrets["env"]                  # ok
+API_URL = st.secrets["api_url"]
+ENV = st.secrets["env"]
 
 # === Authentification GCP ===
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -27,6 +27,23 @@ try:
 except Exception as e:
     raise RuntimeError("❌ Credentials GCP manquants dans st.secrets.")
 
+# === API Request Wrapper ===
+def call_prediction_api(url: str, payload: dict, timeout: int = 60):
+    try:
+        with st.spinner("⏳ En attente de la réponse du modèle..."):
+            response = requests.post(url, json=payload, timeout=timeout)
+            response.raise_for_status()
+            return response.json()
+    except requests.exceptions.Timeout:
+        st.error("⏱️ L’API a mis trop de temps à répondre. Elle est peut-être en cold start.")
+    except requests.exceptions.ConnectionError:
+        st.error("🔌 Impossible de se connecter à l’API. Vérifier l’URL ou la disponibilité du backend.")
+    except requests.exceptions.HTTPError as http_err:
+        st.error(f"❌ Erreur HTTP {response.status_code} : {response.text}")
+    except requests.exceptions.RequestException as req_err:
+        st.error(f"⚠️ Erreur inattendue : {type(req_err).__name__} — {req_err}")
+    return None
+
 # === UI Setup ===
 st.sidebar.title("🧭 Navigation")
 page = st.sidebar.selectbox("Choisissez une page :", ["🔍 Prédiction exemple", "📂 Prédiction CSV batch"])
@@ -38,8 +55,7 @@ model_map = {
     "RF Classifier (Affluence)": ("rf_class", "f1_score")
 }
 model_choice = st.radio("Modèle à utiliser :", list(model_map.keys()))
-model_type, metric = model_map[model_choice] 
-#
+model_type, metric = model_map[model_choice]
 
 # === Exemples ===
 raw_samples = [
@@ -76,16 +92,13 @@ if page == "🔍 Prédiction exemple":
             "model_type": model_type,
             "metric": metric
         }
-        try:
-            r = requests.post(API_URL, json=payload)
-            r.raise_for_status()
-            pred = r.json()["predictions"][0]
+        result = call_prediction_api(API_URL, payload)
+        if result:
+            pred = result["predictions"][0]
             if model_type == "rf_class":
                 st.success("📊 Affluence détectée ✅" if pred == 1 else "📉 Faible fréquentation attendue")
             else:
                 st.success(f"🧾 Prédiction du comptage horaire : **{round(float(pred))} vélos**")
-        except Exception as e:
-            st.error(f"Erreur API : {e}")
 
 # === Page CSV ===
 elif page == "📂 Prédiction CSV batch":
@@ -99,10 +112,9 @@ elif page == "📂 Prédiction CSV batch":
             "model_type": model_type,
             "metric": metric
         }
-        try:
-            r = requests.post(API_URL, json=payload)
-            r.raise_for_status()
-            predictions = r.json()["predictions"]
+        result = call_prediction_api(API_URL, payload)
+        if result:
+            predictions = result["predictions"]
             predictions = np.array(predictions).flatten()
             df_csv["prediction_comptage_horaire"] = predictions.round().astype(int) if model_type != "rf_class" else predictions.astype(int)
 
@@ -113,6 +125,3 @@ elif page == "📂 Prédiction CSV batch":
             file_name = f"predictions_{model_type}_{timestamp}.csv"
             csv_output = df_csv.to_csv(index=False).encode("utf-8")
             st.download_button("📥 Télécharger les résultats", csv_output, file_name=file_name, mime="text/csv")
-        except Exception as e:
-            st.error("Erreur lors de la prédiction :")
-            st.code(str(e))
