@@ -16,9 +16,11 @@ from app.model_registry_summary import get_best_model_from_summary
 
 def get_secret(key, default=None):
     try:
-        return st.secrets[key]
+        # supporte des secrets à deux niveaux (ex: [env] env = "PROD")
+        return st.secrets[key] if key in st.secrets else os.getenv(key, default)
     except Exception:
         return os.getenv(key, default)
+
 
 env = get_secret("env", "DEV")
 
