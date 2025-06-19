@@ -13,6 +13,7 @@ if ROOT_DIR not in sys.path:
 
 # === Configuration ===
 API_URL = st.secrets["api_url"]
+API_RF_CLASS_URL = st.secrets["api_rf_class_url"]
 ENV = st.secrets["env"]
 
 # === Authentification GCP ===
@@ -92,9 +93,10 @@ if page == "🔍 Prédiction exemple":
             "model_type": model_type,
             "metric": metric
         }
+        api_url = API_RF_CLASS_URL if model_type == "rf_class" else API_URL
         st.write("🔧 Payload envoyé :", payload)
-        st.write("🔗 API URL :", API_URL)
-        result = call_prediction_api(API_URL, payload)
+        st.write("🔗 API URL :", api_url)
+        result = call_prediction_api(api_url, payload)
         if result:
             pred = result["predictions"][0]
             if model_type == "rf_class":
@@ -137,7 +139,10 @@ elif page == "📂 Prédiction CSV batch":
             "model_type": model_type,
             "metric": metric
         }
-        result = call_prediction_api(API_URL, payload)
+        api_url = API_RF_CLASS_URL if model_type == "rf_class" else API_URL
+        st.write("🔧 Payload envoyé :", payload)
+        st.write("🔗 API URL :", api_url)
+        result = call_prediction_api(api_url, payload)
         if result:
             predictions = result["predictions"]
             predictions = np.array(predictions).flatten()

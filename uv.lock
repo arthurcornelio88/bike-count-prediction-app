@@ -438,6 +438,7 @@ name = "ds-traffic-cycliste1"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "flask" },
     { name = "fsspec" },
     { name = "gcsfs" },
     { name = "ipykernel" },
@@ -454,6 +455,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "flask", specifier = ">=3.1.1" },
     { name = "fsspec", specifier = ">=2025.5.0" },
     { name = "gcsfs", specifier = ">=2025.5.0.post1" },
     { name = "ipykernel", specifier = ">=6.29.5" },
