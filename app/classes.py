@@ -204,6 +204,7 @@ class AffluenceClassifierPipeline:
 
     @classmethod
     def load(cls, dir_path):
+        print(f"📥 Chargement pipeline Affluence depuis {dir_path}")
         instance = cls()
         instance.cleaner = joblib.load(os.path.join(dir_path, "cleaner.joblib"))
         instance.label_encoder = joblib.load(os.path.join(dir_path, "label_encoder.joblib"))
