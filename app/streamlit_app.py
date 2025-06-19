@@ -21,14 +21,26 @@ def get_secret(key, default=None):
         return os.getenv(key, default)
 
 env = get_secret("env", "DEV")
+
+# 🔑 Credentials GCP (dict ou string)
 gcp_raw = get_secret("gcp_service_account") or get_secret("GCP_SERVICE_ACCOUNT")
 
-if gcp_raw and env == "PROD":
-    gcp_dict = json.loads(gcp_raw) if isinstance(gcp_raw, str) else dict(gcp_raw)
+if env == "PROD":
+    # 🧠 Accepte à la fois TOML (dict) et JSON string
+    if isinstance(gcp_raw, dict):
+        gcp_dict = gcp_raw
+    elif isinstance(gcp_raw, str):
+        gcp_dict = json.loads(gcp_raw)
+    else:
+        raise RuntimeError("❌ Format GCP invalide : ni dict TOML ni string JSON")
+
+    # 📝 Sauvegarde dans /tmp/gcp.json
     with open("/tmp/gcp.json", "w") as f:
         json.dump(gcp_dict, f)
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/gcp.json"
-elif env == "DEV":
+
+else:
+    # ✅ DEV fallback
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./gcp.json"
 
 # === Fonction de chargement dynamique des modèles via summary.json ===
