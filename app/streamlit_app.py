@@ -13,13 +13,10 @@ import time
 import numpy as np
 import app.app_config as _  # forcer le sys.path side effect
 from app.model_registry_summary import get_best_model_from_summary
-
 import streamlit as st
 import os
 import json
 
-import os, json
-import streamlit as st
 
 try:
     gcp_secret = st.secrets["gcp_service_account"]
@@ -53,7 +50,12 @@ nn_pipeline = load_best_pipeline("nn", "r2")
 # st.write("✅ Neural Net chargé !", type(nn_pipeline)) # DEBUG
 st.write("✅ Neural Net chargé !")
 
-affluence_pipeline = load_best_pipeline("rf_class", "f1_score")
+with st.spinner("Chargement du modèle RF Classifier (Affluence)..."):
+    affluence_pipeline = load_best_pipeline("rf_class", "f1_score")
+st.success("✅ RF Classifier (Affluence) chargé !")
+
+
+#affluence_pipeline = load_best_pipeline("rf_class", "f1_score")
 st.write("✅ RF Classifier (Affluence) chargé !")
 
 
