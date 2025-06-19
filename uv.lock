@@ -438,6 +438,7 @@ name = "ds-traffic-cycliste1"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "fastapi" },
     { name = "flask" },
     { name = "fsspec" },
     { name = "gcsfs" },
@@ -451,10 +452,12 @@ dependencies = [
     { name = "streamlit" },
     { name = "tensorflow-cpu", version = "2.18.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform == 'win32'" },
     { name = "tensorflow-cpu", version = "2.19.0", source = { registry = "https://pypi.org/simple" }, marker = "sys_platform != 'win32'" },
+    { name = "uvicorn" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", specifier = ">=0.115.12" },
     { name = "flask", specifier = ">=3.1.1" },
     { name = "fsspec", specifier = ">=2025.5.0" },
     { name = "gcsfs", specifier = ">=2025.5.0.post1" },
@@ -467,6 +470,7 @@ requires-dist = [
     { name = "seaborn", specifier = ">=0.13.2" },
     { name = "streamlit", specifier = ">=1.45.1" },
     { name = "tensorflow-cpu", specifier = ">=2.13.0" },
+    { name = "uvicorn", specifier = ">=0.34.2" },
 ]
 
 [[package]]
