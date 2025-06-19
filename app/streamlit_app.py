@@ -38,7 +38,8 @@ model_map = {
     "RF Classifier (Affluence)": ("rf_class", "f1_score")
 }
 model_choice = st.radio("Modèle à utiliser :", list(model_map.keys()))
-model_type, metric = model_map[model_choice]
+model_type, metric = model_map[model_choice] 
+#
 
 # === Exemples ===
 raw_samples = [
