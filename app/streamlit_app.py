@@ -22,26 +22,32 @@ def get_secret(key, default=None):
 
 env = get_secret("env", "DEV")
 
-# 🔑 Credentials GCP (dict ou string)
+# GCP credentials : supporte TOML (dict) ou string (env var)
 gcp_raw = get_secret("gcp_service_account") or get_secret("GCP_SERVICE_ACCOUNT")
 
 if env == "PROD":
-    # 🧠 Accepte à la fois TOML (dict) et JSON string
-    if isinstance(gcp_raw, dict):
-        gcp_dict = gcp_raw
-    elif isinstance(gcp_raw, str):
-        gcp_dict = json.loads(gcp_raw)
-    else:
-        raise RuntimeError("❌ Format GCP invalide : ni dict TOML ni string JSON")
+    if not gcp_raw:
+        raise RuntimeError("❌ GCP credentials manquants pour PROD")
 
-    # 📝 Sauvegarde dans /tmp/gcp.json
+    try:
+        gcp_dict = json.loads(gcp_raw) if isinstance(gcp_raw, str) else dict(gcp_raw)
+    except Exception as e:
+        raise RuntimeError(f"❌ Erreur parsing GCP credentials : {e}")
+
     with open("/tmp/gcp.json", "w") as f:
         json.dump(gcp_dict, f)
+
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/gcp.json"
+    print("✅ GCP credentials configurés pour Streamlit Cloud")
 
 else:
-    # ✅ DEV fallback
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./gcp.json"
+    # DEV fallback
+    local_cred_path = "./gcp.json"
+    if not os.path.exists(local_cred_path):
+        raise RuntimeError("❌ ./gcp.json non trouvé en DEV")
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = local_cred_path
+    print("✅ GCP credentials configurés pour DEV")
+
 
 # === Fonction de chargement dynamique des modèles via summary.json ===
 def fetch_best_pipeline(model_type: str, metric: str = "r2"):
