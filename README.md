@@ -1,101 +1,114 @@
 # 🚲 Bike Count Prediction
 
-### (Streamlit + MLflow + GCS + DIY Registry)
+### (Streamlit + MLflow + GCS + Custom Registry)
 
-A lightweight, production-ready ML app to predict **hourly bicycle traffic** in Paris using either a **Random Forest** or **Neural Network** model.
+A lightweight, production-ready ML app to predict **hourly bicycle traffic** in Paris using a **Random Forest**, a **Neural Network**, or a **binary classifier** for affluence detection.
 
-> Do want to see it in action ? [Here's our Streamlit Cloud endpoint!](https://dstrafficcyclist1.streamlit.app/))
+> 👉 Try it live: [Streamlit App](https://dstrafficcyclist1.streamlit.app)
 
 ---
 
 ## 🎯 Features
 
-* 🧠 Predict with **Random Forest** or **Neural Network**
-* 🌐 Deployable on **Streamlit Cloud** (zero backend)
-* ☁️ Inference powered by **GCS-hosted models**
-* 📊 Supports both single & batch predictions
-* 🧰 Uses a custom `summary.json` registry — no MLflow dependency at runtime
+* 🧠 Predict with **Random Forest**, **Neural Net**, or **Affluence Classifier**
+* 🌍 **Zero backend** deployable via **Streamlit Cloud**
+* ☁️ Uses **GCS-hosted model artifacts**
+* 🔁 Supports real-time & batch predictions
+* 📦 Leverages a custom **`summary.json` registry** (no MLflow needed at inference)
 
 ---
 
-## 🛠 Architecture Overview
+## 🛠️ Architecture Overview
 
 ```mermaid
 graph TD
   A[User Input / CSV] --> B[Streamlit App]
-  B --> C[Fetch best model from summary.json]
+  B --> C[summary.json in GCS]
   C --> D[Download model from GCS]
-  B --> E[Prediction & Results UI]
+  D --> E[Predict & Return Results]
 
-  subgraph Training Phase
+  subgraph Offline Training
     F[train.py]
-    F --> G[Fit models locally]
-    G --> H[Upload to GCS]
+    F --> G[Train model (RF/NN/Class)]
+    G --> H[Export to GCS]
     G --> I[Update summary.json]
   end
 ```
 
 ---
 
-## 🧠 MLflow-Free Inference (Custom Registry)
+## ⚡ MLflow-Free Inference
 
 Rather than querying the MLflow registry at runtime, we:
 
-* 🔖 Maintain a lightweight **`summary.json`** file in GCS
-* 🧼 Store the **best model only**, filtered by `model_type`, `env`, and `test_mode`
-* 📦 Pull model artifacts directly from GCS inside the Streamlit app
+* Maintain a lightweight **`summary.json`** in GCS
+* Store only the **best model per type/env/test\_mode**
+* Load models in Streamlit directly from GCS
 
-✅ Advantages:
+✅ Benefits:
 
-* No MLflow server required at inference
-* Faster app startup
-* Easy deployment on **Streamlit Cloud**
+* No dependency on a running MLflow instance
+* Fast cold-starts
+* Seamless hosting on **Streamlit Cloud**
 
 ---
 
-## 🚀 Deploy to Streamlit Cloud
+## 🚀 Streamlit Cloud Deployment
 
-Your app is plug-and-play with Streamlit Cloud.
+### 1. Push your repo
 
-### 1. Push to GitHub
+Make sure to include:
 
-Make sure you include:
-
+* `app/streamlit_app.py`
 * `requirements.txt`
-* The full `app/` folder
+* `.streamlit/secrets.toml` (locally only)
 
-### 2. Launch the app
+### 2. Select entry point
 
-Go to [https://share.streamlit.io](https://share.streamlit.io), and select:
+Via [https://share.streamlit.io](https://share.streamlit.io):
 
 ```
 app/streamlit_app.py
 ```
 
-### 3. Configure GCP secrets
+### 3. Configure GCP Secrets (Streamlit Cloud)
 
-Paste your service account JSON into Streamlit secrets:
+Add your **service account JSON** via the Streamlit Cloud UI (as secrets):
 
 ```toml
+env = "PROD"
+
 [gcp_service_account]
-# Paste your full service account JSON key here (see )
-[env]
-ENV="PROD"
+type = "service_account"
+project_id = "..."
+private_key_id = "..."
+private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+client_email = "..."
+...
 ```
 
-> More on how to configure it? [Go to GCP setup](#-gcp-service-accounts-setup).
-
-✅ Done. Streamlit now:
-
-* Loads the best model from `summary.json`
-* Downloads model weights from GCS
-* Predicts live on user input or CSV
+The app will detect and write this to `/tmp/gcp.json` automatically at runtime.
 
 ---
 
-## 🔧 Local Dev & Training
+## 🧪 Local Development & Training
 
-### Prerequisites
+### ✅ Local `.streamlit/secrets.toml`
+
+Create a local file at `.streamlit/secrets.toml` with the same structure as above. This makes `st.secrets["gcp_service_account"]` work identically in both local and cloud environments.
+
+```toml
+env = "DEV"
+
+[gcp_service_account]
+# your full service account key
+```
+
+> ⚠️ If missing, fallback to `./gcp.json` is supported for dev.
+
+---
+
+### ⚙️ Setup
 
 ```bash
 uv init
@@ -104,36 +117,32 @@ uv sync
 source .venv/bin/activate
 ```
 
-### Training
+### 🔁 Train models locally
 
 ```bash
-
-# avant tout
-GOOGLE_APPLICATION_CREDENTIALS=./mlflow-trainer.json
-
-# Fast dev run
+# Train fast subset
 python app/train.py --env dev --model_test
 
-# Full training + GCS upload
+# Full train + GCS export
 python app/train.py --env prod
+```
 
-# For dev purposes. If you're in prod, see Streamlit Cloud section
+### 🧪 Run local UI
+
+```bash
 streamlit run app/streamlit_app.py
 ```
 
 ---
 
-## 📺 (Optional) MLflow Tracking UI
+## 🧭 MLflow Tracking (Optional)
+
+For model monitoring & experiment tracking.
 
 ### In DEV
+
 ```bash
-# Create artifact path
-mkdir -p mlruns_dev/artifacts
-
-# Use GCP key for UI access
 export GOOGLE_APPLICATION_CREDENTIALS=./mlflow-ui-access.json
-
-# Launch UI server in DEV
 
 mlflow server \
   --backend-store-uri file:./mlruns_dev \
@@ -145,74 +154,53 @@ mlflow server \
 ### In PROD
 
 ```bash
-# Create artifact path
-mkdir -p mlruns_prod/artifacts
-
-# Use GCP key for UI access
 export GOOGLE_APPLICATION_CREDENTIALS=./mlflow-ui-access.json
 
-# Launch UI server in PROD
 mlflow server \
   --backend-store-uri file:./mlruns_prod \
   --default-artifact-root gs://df_traffic_cyclist1/mlruns \
   --serve-artifacts \
   --host 127.0.0.1 \
   --port 5000
-
 ```
 
 ---
 
-## 🔐 GCP Service Accounts Setup
+## 🔐 GCP Service Account Structure
 
-This project uses **three GCP service accounts** to separate roles cleanly:
+This project uses **three separate GCP service accounts**:
 
-| Service Account       | Role                    | Used for                      |
-| --------------------- | ----------------------- | ----------------------------- |
-| `mlflow-trainer`      | `Storage Object Admin`  | Training + model upload       |
-| `mlflow-ui-access`    | `Storage Object Viewer` | Accessing MLflow UI in prod   |
-| `gcp_service_account` | `Storage Object Viewer` | Streamlit app model inference |
-
-### DEV: Create and .env file
-
-In root from your repo, with this structure:
-
-```
-ENV=DEV
-GCP_SERVICE_ACCOUNT=./gcp.json
-```
-
-> And, if you're using MLFlow in a semi-prod mode, you'll need `mlflow-ui-access.json` and `mlflow-trainer.json` in root too.  
-
-### PROD: Setup Instructions
-
-1. Go to [IAM → Service Accounts](https://console.cloud.google.com/iam-admin/serviceaccounts)
-2. Create each account and assign roles
-3. Download each JSON key securely
+| ID                    | Role                    | Used for                     |
+| --------------------- | ----------------------- | ---------------------------- |
+| `mlflow-trainer`      | `Storage Object Admin`  | Model training + upload      |
+| `mlflow-ui-access`    | `Storage Object Viewer` | MLflow UI display (optional) |
+| `gcp_service_account` | `Storage Object Viewer` | Inference from Streamlit     |
 
 ---
 
-## 🗂 Directory Structure
+## 📁 Project Structure
 
 ```bash
 app/
-├── app_config.py              # Ensures src/app is in sys.path
-├── streamlit_app.py           # UI logic
-├── train.py                   # CLI trainer
-├── model_registry_summary.py  # Custom registry loader
-├── classes.py                 # RF & NN pipeline classes
+├── app_config.py              # Force import path
+├── streamlit_app.py           # Streamlit UI
+├── train.py                   # Training CLI
+├── model_registry_summary.py  # Custom GCS registry
+├── classes.py                 # Pipeline classes (RF, NN, RFC)
 data/
 models/
-mlruns/                        # Optional MLflow UI
+mlruns/                        # Optional MLflow tracking
+.streamlit/
+└── secrets.toml               # Local secrets
 ```
 
 ---
 
-## 💡 Notes & Tips
+## 💡 Tips
 
-* Cold-starts are fast thanks to direct GCS access
-
-* Easily extendable to support additional models, thanks to their encapsulation within classes.
+* GCS is read-only from Streamlit — perfect for stateless inference
+* Local `.streamlit/secrets.toml` ensures smooth dev/prod parity
+* Supports easily extending new model types via `classes.py`
 
 ---
 
@@ -223,3 +211,5 @@ Built with ❤️ by:
 * [Arthur Cornélio](https://github.com/arthurcornelio88)
 * [Ibtihel Nemri](https://github.com/ibtihelnemri)
 * [Bruno Happi](https://github.com/brunoCo-de)
+
+---

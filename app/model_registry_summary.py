@@ -56,16 +56,6 @@ def update_summary(
                 print("⚠️ summary.json vide ou corrompu. Réinitialisation.")
                 summary = []
 
-    ## ⛔ Supprimer anciens du même type/env/test_mode
-    #summary = [
-    #    s for s in summary
-    #    if not (
-    #        s["model_type"] == model_type
-    #        and s["env"] == env
-    #        and s["test_mode"] == test_mode
-    #    )
-    #]
-
     summary.append(entry)
 
     with open(summary_path_local, "w") as f:
@@ -93,6 +83,8 @@ def get_best_model_from_summary(
     else:
         with open(summary_path, "r") as f:
             summary = json.load(f)
+    print(f"⏳ Étape 1 – Lecture du résumé depuis {summary_path}")
+    print(f"⏳ Étape 2 – Filtrage sur model_type={model_type}, env={env}, test_mode={test_mode}")
 
     filtered = [
         r for r in summary
@@ -117,13 +109,13 @@ def get_best_model_from_summary(
 
     best = max(filtered, key=metric_sorting[metric])
     print(f"🔍 Résumé sélectionné:\n{json.dumps(best, indent=2)}")
-    print(f"📁 Téléchargement depuis GCS : {best['model_uri']}")
-
+    print(f"⏳ Étape 3 – Téléchargement depuis GCS : {best['model_uri']}")
 
     value = best.get(metric, "N/A")
     print(f"✅ Modèle {model_type} sélectionné : {best.get('run_id', 'N/A')} ({metric}={value})")
 
     local_model_path = _download_gcs_dir(best["model_uri"], prefix=model_type)
+    print(f"⏳ Étape 4 – Chargement du modèle depuis {local_model_path}")
 
     # 🔎 Recherche automatique du sous-dossier portant le nom du modèle (ex: rf_class)
     subfolder = os.path.join(local_model_path, model_type)
