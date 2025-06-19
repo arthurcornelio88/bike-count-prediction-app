@@ -17,6 +17,10 @@ import streamlit as st
 import os
 import json
 
+# Pour éviter des logs de TensorFlow trop verbeux
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+# Pour désactiver l'utilisation du GPU
+os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
 
 try:
     gcp_secret = st.secrets["gcp_service_account"]
