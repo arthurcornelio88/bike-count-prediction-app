@@ -21,8 +21,7 @@ def get_secret(key, default=None):
     except Exception:
         return os.getenv(key, default)
 
-
-env = get_secret("env", "DEV")
+env = get_secret("env")
 
 # GCP credentials : supporte TOML (dict) ou string (env var)
 gcp_raw = get_secret("gcp_service_account") or get_secret("GCP_SERVICE_ACCOUNT")
