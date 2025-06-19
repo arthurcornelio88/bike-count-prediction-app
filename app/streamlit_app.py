@@ -1,27 +1,23 @@
 import sys
 import os
+import streamlit as st
+import pandas as pd
+import numpy as np
+import requests
+import json
+import time
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 if ROOT_DIR not in sys.path:
     sys.path.insert(0, ROOT_DIR)
 
-import streamlit as st
-import pandas as pd
-import os
-import json
-import time
-import numpy as np
-import app.app_config as _  # forcer le sys.path side effect
-from app.model_registry_summary import get_best_model_from_summary
-import streamlit as st
-import os
-import json
+# === Configuration ===
+API_URL = st.secrets["api_url"]          # ok
+ENV = st.secrets["env"]                  # ok
 
-# Pour éviter des logs de TensorFlow trop verbeux
+# === Authentification GCP ===
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
-# Pour désactiver l'utilisation du GPU
-os.environ["CUDA_VISIBLE_DEVICES"] = "-1"
-
+os.environ['CUDA_VISIBLE_DEVICES'] = "-1"
 try:
     gcp_secret = st.secrets["gcp_service_account"]
     with open("/tmp/gcp.json", "w") as f:
@@ -29,57 +25,22 @@ try:
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "/tmp/gcp.json"
     print("✅ GCP credentials configurés via Streamlit secrets")
 except Exception as e:
-    raise RuntimeError("❌ Credentials GCP manquants dans st.secrets et aucun fallback n’est prévu.")
+    raise RuntimeError("❌ Credentials GCP manquants dans st.secrets.")
 
-# === Fonction de chargement dynamique des modèles via summary.json ===
-def fetch_best_pipeline(model_type: str, metric: str = "r2"):
-    print("📦 Chargement de get_best_model_from_summary depuis model_registry_summary.py")
-    return get_best_model_from_summary(
-        model_type=model_type,
-        summary_path="gs://df_traffic_cyclist1/models/summary.json",
-        metric=metric,
-        env="prod",
-    )
-
-@st.cache_resource
-def load_best_pipeline(model_type: str, metric: str = "r2"):
-    return fetch_best_pipeline(model_type, metric)
-
-# Chargement des pipelines
-rf_pipeline = load_best_pipeline("rf", "r2")
-# st.write("✅ Random Forest chargé :", type(rf_pipeline)) # DEBUG
-st.write("✅ Random Forest chargé !")
-
-nn_pipeline = load_best_pipeline("nn", "r2")
-# st.write("✅ Neural Net chargé !", type(nn_pipeline)) # DEBUG
-st.write("✅ Neural Net chargé !")
-
-with st.spinner("Chargement du modèle RF Classifier (Affluence)..."):
-    affluence_pipeline = load_best_pipeline("rf_class", "f1_score")
-st.success("✅ RF Classifier (Affluence) chargé !")
-
-
-#affluence_pipeline = load_best_pipeline("rf_class", "f1_score")
-st.write("✅ RF Classifier (Affluence) chargé !")
-
-
-# === UI ===
+# === UI Setup ===
 st.sidebar.title("🧭 Navigation")
 page = st.sidebar.selectbox("Choisissez une page :", ["🔍 Prédiction exemple", "📂 Prédiction CSV batch"])
 st.title("🚲 Prédiction du comptage horaire de vélos")
-modele = st.radio("Modèle à utiliser :", ["Random Forest", "Réseau de Neurones", "RF Classifier (Affluence)"])
 
-# Fonction utilitaire pour obtenir le bon pipeline
-def get_pipeline(name: str):
-    if name == "Random Forest":
-        return rf_pipeline
-    elif name == "Réseau de Neurones":
-        return nn_pipeline
-    elif name == "RF Classifier (Affluence)":
-        return affluence_pipeline
+model_map = {
+    "Random Forest": ("rf", "r2"),
+    "Réseau de Neurones": ("nn", "r2"),
+    "RF Classifier (Affluence)": ("rf_class", "f1_score")
+}
+model_choice = st.radio("Modèle à utiliser :", list(model_map.keys()))
+model_type, metric = model_map[model_choice]
 
-
-# === Exemples manuels
+# === Exemples ===
 raw_samples = [
     {
         'nom_du_compteur': '35 boulevard de Ménilmontant NO-SE',
@@ -101,54 +62,56 @@ raw_samples = [
     }
 ]
 
-# === Page 1 : prédiction manuelle
+# === Page Exemple ===
 if page == "🔍 Prédiction exemple":
-    idx = st.selectbox("Sélectionnez une observation brute à prédire :", range(len(raw_samples)), format_func=lambda i: f"Exemple {i+1}")
-    sample_df = pd.DataFrame([raw_samples[idx]])
-    pipeline = get_pipeline(modele)
+    idx = st.selectbox("Sélectionnez une observation :", range(len(raw_samples)), format_func=lambda i: f"Exemple {i+1}")
+    selected = raw_samples[idx]
+    st.markdown("### 🔍 Observation sélectionnée")
+    st.json(selected)
 
-    try:
-        if modele == "RF Classifier (Affluence)":
-            pred = pipeline.predict(sample_df)[0]
-            str_pred = "📊 Affluence détectée ✅" if pred == 1 else "📉 Faible fréquentation attendue"
-        else:
-            pred = pipeline.predict_clean(sample_df)[0]
-            str_pred = f"🧾 Prédiction du comptage horaire : **{round(float(pred))} vélos**"
+    if st.button("🔮 Lancer la prédiction"):
+        payload = {
+            "records": [selected],
+            "model_type": model_type,
+            "metric": metric
+        }
+        try:
+            r = requests.post(API_URL, json=payload)
+            r.raise_for_status()
+            pred = r.json()["predictions"][0]
+            if model_type == "rf_class":
+                st.success("📊 Affluence détectée ✅" if pred == 1 else "📉 Faible fréquentation attendue")
+            else:
+                st.success(f"🧾 Prédiction du comptage horaire : **{round(float(pred))} vélos**")
+        except Exception as e:
+            st.error(f"Erreur API : {e}")
 
-        if isinstance(pred, (list, np.ndarray)) and isinstance(pred[0], (list, np.ndarray)):
-            pred = pred[0]
-
-        st.markdown("### 🔍 Observation sélectionnée")
-        st.json(raw_samples[idx])
-        st.success(str_pred)
-
-    except Exception as e:
-        st.error("Erreur lors de la prédiction :")
-        st.code(str(e))
-        st.exception(e)
-
-# === Page 2 : prédiction sur CSV
+# === Page CSV ===
 elif page == "📂 Prédiction CSV batch":
     st.header("Prédiction sur fichier CSV brut")
     uploaded_file = st.file_uploader("Chargez un fichier brut (.csv)", type="csv")
 
     if uploaded_file is not None:
         df_csv = pd.read_csv(uploaded_file)
-        pipeline = get_pipeline(modele)
+        payload = {
+            "records": df_csv.to_dict(orient="records"),
+            "model_type": model_type,
+            "metric": metric
+        }
         try:
-            predictions = pipeline.predict(df_csv)
-            predictions = predictions.flatten() if hasattr(predictions, "flatten") else predictions
-            df_csv['prediction_comptage_horaire'] = predictions.round().astype(int)
+            r = requests.post(API_URL, json=payload)
+            r.raise_for_status()
+            predictions = r.json()["predictions"]
+            predictions = np.array(predictions).flatten()
+            df_csv["prediction_comptage_horaire"] = predictions.round().astype(int) if model_type != "rf_class" else predictions.astype(int)
 
             st.markdown("✅ **Résultats :**")
             st.dataframe(df_csv.head(20))
 
             timestamp = time.strftime("%Y%m%d_%H%M%S")
-            file_name = f"predictions_{modele.lower().replace(' ', '_')}_{timestamp}.csv"
-            csv_output = df_csv.to_csv(index=False).encode('utf-8')
+            file_name = f"predictions_{model_type}_{timestamp}.csv"
+            csv_output = df_csv.to_csv(index=False).encode("utf-8")
             st.download_button("📥 Télécharger les résultats", csv_output, file_name=file_name, mime="text/csv")
-
         except Exception as e:
             st.error("Erreur lors de la prédiction :")
             st.code(str(e))
-            st.exception(e)
