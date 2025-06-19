@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: my-api
+    runtime: python
+    branch: backend_creation
+    region: frankfurt
+
+    buildCommand: |
+      uv sync --frozen
+
+    startCommand: uvicorn app.fastapi_app:app --host 0.0.0.0 --port 10000
+
+    envVars:
+      - key: GOOGLE_APPLICATION_CREDENTIALS
+        value: /etc/secrets/gcp-key.json
+
+    secretFiles:
+      - name: gcp-key.json
+        mountPath: /etc/secrets/gcp-key.json
+
+    autoDeploy: true
