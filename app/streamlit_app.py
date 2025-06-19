@@ -112,6 +112,18 @@ if page == "🔍 Prédiction exemple":
                     st.warning(f"⚠️ API répond mais code inattendu : {ping_response.status_code}")
             except Exception as e:
                 st.error(f"❌ API inaccessible : {e}")
+        if st.button("🔄 Forcer /refresh_models"):
+            try:
+                refresh_url = API_URL.replace("/predict", "/refresh_models")
+                refresh_response = requests.post(refresh_url, timeout=15)
+                if refresh_response.status_code == 200:
+                    st.success("✅ Modèles rechargés depuis /refresh_models.")
+                    st.json(refresh_response.json())
+                else:
+                    st.warning(f"⚠️ Requête envoyée mais réponse inattendue : {refresh_response.status_code}")
+            except Exception as e:
+                st.error(f"❌ Échec du refresh : {e}")
+
 
 # === Page CSV ===
 elif page == "📂 Prédiction CSV batch":
