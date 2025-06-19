@@ -8,15 +8,40 @@ from typing import List, Dict
 
 from app.model_registry_summary import get_best_model_from_summary
 
-# === GCP credentials ===
-GCP_CREDENTIAL_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-if GCP_CREDENTIAL_PATH and os.path.exists(GCP_CREDENTIAL_PATH):
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GCP_CREDENTIAL_PATH
+import os
+
+# === Détection de l'environnement ===
+ENV = os.getenv("ENV", "DEV").upper()
+
+if ENV == "PROD":
+    # En PROD, on génère le fichier de credentials à partir du contenu JSON
+    gcp_json = os.getenv("GCP_JSON_CONTENT")
+    if not gcp_json:
+        raise EnvironmentError("❌ GCP_JSON_CONTENT manquant en PROD.")
+    
+    cred_path = "/tmp/gcp_creds.json"
+    with open(cred_path, "w") as f:
+        f.write(gcp_json)
+    
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_path
+    print("✅ Credentials GCP chargés en PROD.")
+
+elif ENV == "DEV":
+    # En DEV, on attend un chemin classique vers un fichier
+    cred_path = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+    if cred_path and os.path.exists(cred_path):
+        print("✅ Credentials GCP trouvés en DEV.")
+    else:
+        raise EnvironmentError("❌ Fichier de credentials GCP introuvable en DEV.")
 else:
-    raise EnvironmentError("❌ GCP credentials non trouvés ou GOOGLE_APPLICATION_CREDENTIALS non définie.")
+    raise EnvironmentError(f"❌ ENV inconnu : {ENV}")
+
 
 # === Cache global des modèles ===
 loaded_model: object = None  # On garde un seul modèle en cache
+
+# === FastAPI app ===
+app = FastAPI()
 
 # === Préchargement du modèle rf_class lors du startup ===
 @app.on_event("startup")
@@ -34,9 +59,6 @@ async def load_model():
         print("✅ Modèle 'rf_class' préchargé")
     except Exception as e:
         print(f"⚠️ Échec chargement modèle 'rf_class' : {e}")
-
-# === FastAPI app ===
-app = FastAPI()
 
 # === Schéma de la requête ===
 class PredictRequest(BaseModel):

@@ -1,6 +1,9 @@
 # Utiliser l'image officielle de Python
 FROM python:3.11-slim
 
+# Mettre à jour pip vers la dernière version
+RUN python -m pip install --upgrade pip
+
 # Définir un répertoire de travail dans le conteneur
 WORKDIR /app
 
