@@ -92,6 +92,8 @@ if page == "🔍 Prédiction exemple":
             "model_type": model_type,
             "metric": metric
         }
+        st.write("🔧 Payload envoyé :", payload)
+        st.write("🔗 API URL :", API_URL)
         result = call_prediction_api(API_URL, payload)
         if result:
             pred = result["predictions"][0]
@@ -99,6 +101,17 @@ if page == "🔍 Prédiction exemple":
                 st.success("📊 Affluence détectée ✅" if pred == 1 else "📉 Faible fréquentation attendue")
             else:
                 st.success(f"🧾 Prédiction du comptage horaire : **{round(float(pred))} vélos**")
+    
+    with st.expander("🩺 Debug API"):
+        if st.button("🔁 Forcer ping API"):
+            try:
+                ping_response = requests.get(API_URL.replace("/predict", "/docs"), timeout=10)
+                if ping_response.status_code == 200:
+                    st.success("✅ API en ligne (endpoint /docs accessible).")
+                else:
+                    st.warning(f"⚠️ API répond mais code inattendu : {ping_response.status_code}")
+            except Exception as e:
+                st.error(f"❌ API inaccessible : {e}")
 
 # === Page CSV ===
 elif page == "📂 Prédiction CSV batch":
