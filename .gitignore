@@ -20,9 +20,9 @@ models/
 
 # gcredentials
 gcp.json
-cloud_function/gcp.json
-cloud_function/env.yaml
-cloud_function/.env
+backend/cloud_run/gcp.json
+backend/render/gcp.json
+backend/cloud_run/.env
 secrets.toml
 mlflow-trainer.json
 mlflow-ui-access.json
