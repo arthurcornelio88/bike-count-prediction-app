@@ -157,8 +157,6 @@ Utiliser les URL suivantes dans le front Streamlit :
 * Nettoyer régulièrement les artefacts dans : [https://console.cloud.google.com/artifacts](https://console.cloud.google.com/artifacts)
 * Le **repository `cloud-run-images`** doit être utilisé pour tous les déploiements (éviter `gcf_artifacts` limité à 2GB).
 
-Parfait. Voici la **conclusion** à ajouter à ta documentation, dans le style du reste du document, avec les bonnes pratiques et retours d'expérience (REX) que tu as formulés :
-
 ---
 
 ## ✅ Conclusion – Retours d'expérience (REX)
@@ -177,7 +175,7 @@ Parfait. Voici la **conclusion** à ajouter à ta documentation, dans le style d
 
 #### 2. **Architecture de chargement des modèles**
 
-* Initialement, les modèles étaient chargés directement depuis **Streamlit Cloud**. Résultat : trop lent, trop fragile.
+* Initialement, les modèles étaient chargés directement depuis **Streamlit Cloud**. Résultat : trop lent, trop fragile, ou sinon, crash.
 * Ensuite, les modèles étaient **chargés à chaque prédiction via API**. Trop coûteux, notamment si plusieurs modèles doivent être disponibles.
 * Solution optimale :
 
@@ -190,5 +188,14 @@ Parfait. Voici la **conclusion** à ajouter à ta documentation, dans le style d
 * L'aller-retour **dev/prod** est essentiel. Pouvoir reproduire un comportement localement avec `docker compose`, `curl` et `FastAPI` est une immense aide.
 * Les temps de build/déploiement sur Cloud Run ou Render sont **très longs**. Il faut tester **un maximum de logique en local** pour éviter les frustrations.
 * Les requêtes `curl` avec des JSON de test sont **indispensables** pour itérer vite et valider l'API sans dépendre du front.
+
+#### 4. **Gestion des environnements (DEV / PROD)**
+
+* Sur Render, la gestion d'environnements est **compliquée et peu flexible** (versions Python, dépendances, secrets...).
+* En construisant ses propres images Docker, **tout est sous contrôle** :
+
+  * Les bugs apparaissent **en local d’abord**, donc plus facile à debugger.
+  * L’environnement est **isolé, reproductible et stable** : ce qui marche en local marchera en prod.
+  * On maîtrise la version de Python, les libs, les chemins, les variables — **pas de mauvaise surprise au déploiement**.
 
 ---
