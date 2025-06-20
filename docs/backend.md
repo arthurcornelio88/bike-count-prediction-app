@@ -10,11 +10,38 @@ API de prédiction du trafic cycliste utilisant des modèles de machine learning
 
 ### En terminal CLI: 
 
+#### Lancement des backends
+
+Backend 1
 
 ```bash
-curl -X POST 'http://localhost:8080/predict' \
+export GOOGLE_APPLICATION_CREDENTIALS="./gcp.json" 
+uvicorn app.fastapi_app:app --reload --port 8000
+```
+
+Backend 2
+
+```bash
+cd cloud_run
+export GCP_JSON_CONTENT="$(cat gcp.json)"
+uvicorn app.main:app --port 8001 --reload 
+```
+
+#### Test endpoint
+
+Backend 1
+
+```bash
+curl -X POST 'http://localhost:8000/predict' \
   -H "Content-Type: application/json" \
   -d '{"records": [{"nom_du_compteur": "35 boulevard de Ménilmontant NO-SE","date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00","coordonnées_géographiques": "48.8672, 2.3501","mois_annee_comptage": "mai 2025"}],"model_type": "nn","metric": "r2"}'
+```
+Backend 2
+
+```bash
+curl -X POST 'http://localhost:8001/predict' \
+  -H "Content-Type: application/json" \
+  -d '{"records": [{"nom_du_compteur": "35 boulevard de Ménilmontant NO-SE","date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00","coordonnées_géographiques": "48.8672, 2.3501","mois_annee_comptage": "mai 2025"}],"model_type": "rf_class","metric": "f1_score"}'
 ```
 
 ### Accès à l’interface Swagger :
