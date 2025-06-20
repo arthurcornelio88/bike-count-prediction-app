@@ -5,8 +5,7 @@ from typing import Optional
 import datetime
 from urllib.request import urlopen
 import app.app_config as _  # forcer le sys.path side effect
-from app.classes import RFPipeline, NNPipeline, AffluenceClassifierPipeline
-
+from app.classes import AffluenceClassifierPipeline
 
 
 def update_summary(
@@ -23,7 +22,6 @@ def update_summary(
     recall: float = None,
     f1_score: float = None
 ):
-
     entry = {
         "timestamp": datetime.datetime.utcnow().isoformat(),
         "model_type": model_type,
@@ -33,7 +31,6 @@ def update_summary(
         "model_uri": model_uri,
     }
 
-    # Ajoute les métriques si elles sont fournies
     if rmse is not None: entry["rmse"] = rmse
     if r2 is not None: entry["r2"] = r2
     if accuracy is not None: entry["accuracy"] = accuracy
@@ -41,11 +38,9 @@ def update_summary(
     if recall is not None: entry["recall"] = recall
     if f1_score is not None: entry["f1_score"] = f1_score
 
-    # Déterminer le chemin local
     summary_path_local = "/tmp/summary.json" if summary_path.startswith("gs://") else summary_path
     summary = []
 
-    # Télécharger ou charger si existant
     if summary_path.startswith("gs://"):
         os.system(f"gsutil cp {summary_path} {summary_path_local} || touch {summary_path_local}")
     if os.path.exists(summary_path_local):
@@ -67,13 +62,13 @@ def update_summary(
     else:
         print(f"✅ summary.json mis à jour localement : {summary_path}")
 
-# === Chargement du meilleur modèle depuis le résumé
+
 def get_best_model_from_summary(
     model_type: str,
     summary_path: str,
     env: str = "prod",
     metric: str = "rmse",
-    test_mode: Optional[bool] = False # True pour test, False pour prod
+    test_mode: Optional[bool] = False
 ):
     if summary_path.startswith("gs://"):
         summary = _read_gcs_json(summary_path)
@@ -83,6 +78,7 @@ def get_best_model_from_summary(
     else:
         with open(summary_path, "r") as f:
             summary = json.load(f)
+
     print(f"⏳ Étape 1 – Lecture du résumé depuis {summary_path}")
     print(f"⏳ Étape 2 – Filtrage sur model_type={model_type}, env={env}, test_mode={test_mode}")
 
@@ -91,7 +87,6 @@ def get_best_model_from_summary(
         if r["model_type"] == model_type
         and r["env"] == env
         and r["test_mode"] == test_mode
-        #and r["rmse"] > 0  # éviter les modèles fictifs/perfectibles
     ]
 
     if not filtered:
@@ -117,7 +112,6 @@ def get_best_model_from_summary(
     local_model_path = _download_gcs_dir(best["model_uri"], prefix=model_type)
     print(f"⏳ Étape 4 – Chargement du modèle depuis {local_model_path}")
 
-    # 🔎 Recherche automatique du sous-dossier portant le nom du modèle (ex: rf_class)
     subfolder = os.path.join(local_model_path, model_type)
     if os.path.isdir(subfolder):
         print(f"📁 Sous-dossier détecté pour {model_type}, on l'utilise : {subfolder}")
@@ -126,19 +120,12 @@ def get_best_model_from_summary(
         print(f"⚠️ Aucun sous-dossier {model_type} trouvé dans {local_model_path}")
         print(f"📂 Contenu détecté : {os.listdir(local_model_path)}")
 
-
-
-    if model_type == "rf":
-        return RFPipeline.load(local_model_path)
-    elif model_type == "nn":
-        return NNPipeline.load(local_model_path)
-    elif model_type == "rf_class":
+    if model_type == "rf_class":
         return AffluenceClassifierPipeline.load(local_model_path)
     else:
         raise ValueError("Type de modèle non reconnu")
 
 
-# === Téléchargement GCS vers /tmp
 def _download_gcs_dir(gcs_uri: str, prefix="model") -> str:
     from google.cloud import storage
 
@@ -146,6 +133,7 @@ def _download_gcs_dir(gcs_uri: str, prefix="model") -> str:
     local_tmp_dir = f"/tmp/{prefix}_{uuid.uuid4().hex}"
     os.makedirs(local_tmp_dir, exist_ok=True)
 
+    print(f"🔐 Credentials utilisés : {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
     client = storage.Client()
     blobs = list(client.list_blobs(bucket_name, prefix=path))
 
@@ -154,8 +142,6 @@ def _download_gcs_dir(gcs_uri: str, prefix="model") -> str:
 
     for blob in blobs:
         rel_path = os.path.relpath(blob.name, path)
-
-        # ⛔ Ignore les "blobs de répertoire"
         if rel_path in (".", "") or blob.name.endswith("/"):
             print(f"🚫 Blob ignoré (répertoire ou vide) : {blob.name}")
             continue
@@ -174,7 +160,6 @@ def _download_gcs_dir(gcs_uri: str, prefix="model") -> str:
     return local_tmp_dir
 
 
-# === Lecture JSON depuis GCS
 def _read_gcs_json(gs_path: str) -> dict:
     from google.cloud import storage
 

@@ -22,6 +22,7 @@ models/
 gcp.json
 cloud_function/gcp.json
 cloud_function/env.yaml
+cloud_function/.env
 secrets.toml
 mlflow-trainer.json
 mlflow-ui-access.json
@@ -30,5 +31,5 @@ mlflow-ui-access.json
 .devcontainer/
 
 models/*
-
+tmp_nn_model/
 summary.json
