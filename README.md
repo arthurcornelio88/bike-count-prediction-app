@@ -121,10 +121,10 @@ source .venv/bin/activate
 
 ```bash
 # Train fast subset
-python app/train.py --env dev --model_test
+python src/train.py --env dev --model_test
 
 # Full train + GCS export
-python app/train.py --env prod
+python src/train.py --env prod
 ```
 
 ### 🧪 Run local UI

@@ -5,15 +5,14 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115.12",
-    "flask>=3.1.1",
+    "fastapi==0.115.12",
     "folium>=0.20.0",
     "fsspec>=2025.5.0",
     "gcsfs>=2025.5.0.post1",
     "ipykernel>=6.29.5",
     "matplotlib>=3.10.3",
-    "mlflow>=2.22.0",
-    "numpy>=2.0.2",
+    "mlflow==2.22.0",
+    "numpy",
     "pandas>=2.2.3",
     "pillow>=11.2.1",
     "plotly>=6.1.2",
@@ -24,9 +23,4 @@ dependencies = [
     "streamlit-folium>=0.25.0",
     "tensorflow-cpu>=2.13.0",
     "uvicorn>=0.34.2",
-]
-
-[tool.uv.workspace]
-members = [
-    "backend/render",
 ]
