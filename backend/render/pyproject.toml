@@ -9,7 +9,7 @@ dependencies = [
     "fsspec>=2025.5.0",
     "gcsfs>=2025.5.0.post1",
     "pandas>=2.2.3",
-    "scikit-learn>=1.6.1",
-    "tensorflow-cpu>=2.13.0",
+    "scikit-learn==1.6.1",
+    "tensorflow-cpu==2.13.0",
     "uvicorn>=0.34.2",
 ]
