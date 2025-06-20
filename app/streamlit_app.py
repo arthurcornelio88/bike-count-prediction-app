@@ -95,14 +95,15 @@ if page == "🔍 Prédiction exemple":
         }
         #api_url = API_URL  # No RF Class URL for this example, testing
         api_url = API_RF_CLASS_URL if model_type == "rf_class" else API_URL
-        st.write("🔧 Payload envoyé :", payload)
-        st.write("🔗 API URL :", api_url)
+        #st.write("🔧 Payload envoyé :", payload)
+        #st.write("🔗 API URL :", api_url)
         result = call_prediction_api(api_url, payload)
         if result:
             pred = result["predictions"][0]
             if model_type == "rf_class":
                 st.success("📊 Affluence détectée ✅" if pred == 1 else "📉 Faible fréquentation attendue")
             else:
+                pred = result["predictions"][0][0]
                 st.success(f"🧾 Prédiction du comptage horaire : **{round(float(pred))} vélos**")
     
     with st.expander("🩺 Debug API"):
@@ -142,8 +143,8 @@ elif page == "📂 Prédiction CSV batch":
         }
         #api_url = API_URL  # No RF Class URL for this batch processing
         api_url = API_RF_CLASS_URL if model_type == "rf_class" else API_URL
-        st.write("🔧 Payload envoyé :", payload)
-        st.write("🔗 API URL :", api_url)
+        #st.write("🔧 Payload envoyé :", payload)
+        #st.write("🔗 API URL :", api_url)
         result = call_prediction_api(api_url, payload)
         if result:
             predictions = result["predictions"]
