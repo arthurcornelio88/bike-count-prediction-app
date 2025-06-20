@@ -1,157 +1,194 @@
-# 📘 Documentation API – `ds_traffic_cyclist1`
+# 📘 Documentation – Backend `ds_traffic_cyclist1`
 
-## Objectif
+## 🔧 Environnement de développement (DEV)
 
-API de prédiction du trafic cycliste utilisant des modèles de machine learning, déployée sur Render.com.
+### 📂 `.env` requis pour chaque service
+
+```env
+ENV=DEV
+GOOGLE_APPLICATION_CREDENTIALS=gcp.json
+```
+
+### ▶️ Lancer les deux API en local
+
+```bash
+docker compose up --build
+```
+
+Cela instancie deux services :
+
+* `cloudrun-classmodel-backend` (port 8080)
+* `cloudrun-regmodel-backend` (port 8000)
 
 ---
 
-## 🔧 Utilisation locale (DEV)
+### 🔁 Endpoints locaux
 
-### En terminal CLI: 
-
-#### Lancement des backends
-
-Backend 1
+#### ClassModel API
 
 ```bash
-export GOOGLE_APPLICATION_CREDENTIALS="./gcp.json" 
-uvicorn app.fastapi_app:app --reload --port 8000
+curl -X POST 'http://localhost:8080/predict' \
+  -H "Content-Type: application/json" \
+  -d '{"records": [{"nom_du_compteur": "35 boulevard de Ménilmontant NO-SE", "date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00", "coordonnées_géographiques": "48.8672, 2.3501", "mois_annee_comptage": "mai 2025"}]}'
 ```
 
-Backend 2
+#### RegModel API
 
 ```bash
-cd backend/cloud_run
-export GCP_JSON_CONTENT="$(cat gcp.json)"
-export GOOGLE_APPLICATION_CREDENTIALS="./gcp.json" 
-uvicorn app.main:app --port 8001 --reload 
-```
-
-#### Test endpoint
-
-Backend 1
-
-```bash
-export PYTHONPATH=$(pwd) #si nécessaire
-cd backend/render
 curl -X POST 'http://localhost:8000/predict' \
   -H "Content-Type: application/json" \
-  -d '{"records": [{"nom_du_compteur": "35 boulevard de Ménilmontant NO-SE","date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00","coordonnées_géographiques": "48.8672, 2.3501","mois_annee_comptage": "mai 2025"}],"model_type": "nn","metric": "r2"}'
+  -d '{"records": [{"nom_du_compteur": "35 boulevard de Ménilmontant NO-SE", "date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00", "coordonnées_géographiques": "48.8672, 2.3501", "mois_annee_comptage": "mai 2025"}], "model_type": "nn", "metric": "r2"}'
 ```
-Backend 2
+
+---
+
+## ☁️ Déploiement en production (GCP Cloud Run)
+
+### 🧱 Configuration initiale
+
+Créer le repository Docker :
 
 ```bash
-curl -X POST 'http://localhost:8001/predict' \
-  -H "Content-Type: application/json" \
-  -d '{"records": [{"nom_du_compteur": "35 boulevard de Ménilmontant NO-SE","date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00","coordonnées_géographiques": "48.8672, 2.3501","mois_annee_comptage": "mai 2025"}],"model_type": "rf_class","metric": "f1_score"}'
+gcloud artifacts repositories create cloud-run-images \
+  --project=datascientest-460618 \
+  --location=europe-west1 \
+  --repository-format=docker \
+  --description="Docker repository for Cloud Run images"
 ```
 
-### Accès à l’interface Swagger :
-
-```
-http://127.0.0.1:8000/docs#/default/predict_predict_post
-```
-
-### Exemple de requête :
-
-```json
-{
-  "records": [
-    {
-      "nom_du_compteur": "35 boulevard de Ménilmontant NO-SE",
-      "date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00",
-      "coordonnées_géographiques": "48.8672, 2.3501",
-      "mois_annee_comptage": "mai 2025"
-    }
-  ],
-  "model_type": "nn",
-  "metric": "r2"
-}
-```
-
-### Réponse attendue :
-
-```json
-{
-  "predictions": [
-    [
-      364.9353942871094
-    ]
-  ]
-}
-```
-
----
-
-## 🌐 Utilisation en production (PROD)
-
-### Exemple `curl` :
-
-
-Backend 1
+Créer le secret GCP :
 
 ```bash
-curl -X POST https://ds-traffic-cyclist1.onrender.com/predict \
-  -H "Content-Type: application/json" \
-  -d '{"records": [{"nom_du_compteur": "35 boulevard de Ménilmontant NO-SE","date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00","coordonnées_géographiques": "48.8672, 2.3501","mois_annee_comptage": "mai 2025"}],"model_type": "nn","metric": "r2"}'
+gcloud secrets create gcp-service-account \
+  --data-file=gcp.json
 ```
 
-Backend 2
+Donner accès au service Cloud Run pour lire les secrets :
 
-curl -X POST https://europe-west1-datascientest-460618.cloudfunctions.net/predict_api_v3/predict \
+```bash
+gcloud projects add-iam-policy-binding datascientest-460618 \
+  --member="serviceAccount:467498471756-compute@developer.gserviceaccount.com" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+Configurer Docker pour GCP :
+
+```bash
+gcloud auth configure-docker europe-west1-docker.pkg.dev
+```
+
+---
+
+## 🧩 Déploiement des services
+
+### 🔹 ClassModel API
+
+```bash
+cd backend/classmodel
+
+docker build -t europe-west1-docker.pkg.dev/datascientest-460618/cloud-run-images/classmodel-api:latest .
+
+docker push europe-west1-docker.pkg.dev/datascientest-460618/cloud-run-images/classmodel-api:latest
+
+gcloud run deploy classmodel-api \
+  --image europe-west1-docker.pkg.dev/datascientest-460618/cloud-run-images/classmodel-api:latest \
+  --region europe-west1 \
+  --allow-unauthenticated \
+  --port 8080 \
+  --memory=4Gi \
+  --set-env-vars=ENV=PROD \
+  --update-secrets=GCP_JSON_CONTENT=gcp-service-account:latest
+```
+
+---
+
+### 🔹 RegModel API
+
+```bash
+cd backend/regmodel
+
+docker build -t europe-west1-docker.pkg.dev/datascientest-460618/cloud-run-images/regmodel-api:latest .
+
+docker push europe-west1-docker.pkg.dev/datascientest-460618/cloud-run-images/regmodel-api:latest
+
+gcloud run deploy regmodel-api \
+  --image europe-west1-docker.pkg.dev/datascientest-460618/cloud-run-images/regmodel-api:latest \
+  --region europe-west1 \
+  --allow-unauthenticated \
+  --port 8000 \
+  --memory=4Gi \
+  --set-env-vars=ENV=PROD \
+  --update-secrets=GCP_JSON_CONTENT=gcp-service-account:latest
+```
+
+---
+
+## 🌐 Endpoints en production
+
+### ✅ RegModel API
+
+```bash
+curl -X POST "https://regmodel-api-467498471756.europe-west1.run.app/predict" \
   -H "Content-Type: application/json" \
-  -d '{"records": [{"nom_du_compteur": "35 boulevard de Ménilmontant NO-SE","date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00","coordonnées_géographiques": "48.8672, 2.3501","mois_annee_comptage": "mai 2025"}],"model_type": "nn","metric": "r2"}'
+  -d '{"records": [{"nom_du_compteur": "35 boulevard de Ménilmontant NO-SE", "date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00", "coordonnées_géographiques": "48.8672, 2.3501", "mois_annee_comptage": "mai 2025"}], "model_type": "nn", "metric": "r2"}'
+```
+
+### ✅ ClassModel API
+
+```bash
+curl -X POST "https://classmodel-api-467498471756.europe-west1.run.app/predict" \
+  -H "Content-Type: application/json" \
+  -d '{"records": [{"nom_du_compteur": "35 boulevard de Ménilmontant NO-SE", "date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00", "coordonnées_géographiques": "48.8672, 2.3501", "mois_annee_comptage": "mai 2025"}]}'
+```
 
 ---
 
-## 🔁 Déploiement Render (CI/CD)
+## 📊 Intégration Streamlit Cloud
 
-### Remarque :
+Utiliser les URL suivantes dans le front Streamlit :
 
-La fonctionnalité `render.yaml` (Infrastructure as Code) est disponible uniquement sur les offres payantes de Render.
-Les paramètres doivent donc être configurés via l’interface utilisateur.
-
----
-
-### Paramètres du service
-
-* **Name** : `ds_traffic_cyclist1`
-* **Region** : `Frankfurt`
-* **Repository** : `https://github.com/arthurcornelio88/ds_traffic_cyclist1`
-* **Branch** : `master` (ou `backend_creation` pour staging)
-* **Build Command** :
-
-  ```bash
-  uv sync --frozen
-  ```
-* **Start Command** :
-
-  ```bash
-  uvicorn app.fastapi_app:app --host 0.0.0.0 --port 10000
-  ```
+* [https://classmodel-api-467498471756.europe-west1.run.app/predict](https://classmodel-api-467498471756.europe-west1.run.app/predict)
+* [https://regmodel-api-467498471756.europe-west1.run.app/predict](https://regmodel-api-467498471756.europe-west1.run.app/predict)
 
 ---
 
-### Variables d’environnement
+## 🧹 Maintenance
 
-| Clé                              | Valeur                  |
-| -------------------------------- | ----------------------- |
-| `GOOGLE_APPLICATION_CREDENTIALS` | `/etc/secrets/gcp.json` |
+* Nettoyer régulièrement les artefacts dans : [https://console.cloud.google.com/artifacts](https://console.cloud.google.com/artifacts)
+* Le **repository `cloud-run-images`** doit être utilisé pour tous les déploiements (éviter `gcf_artifacts` limité à 2GB).
 
----
-
-### Fichiers secrets
-
-| Nom du fichier | Description                                           |
-| -------------- | ----------------------------------------------------- |
-| `gcp.json`     | Contenu JSON de la clé GCP (copié-collé manuellement) |
-
-Le fichier est monté dans le conteneur à l'emplacement `/etc/secrets/gcp.json`.
+Parfait. Voici la **conclusion** à ajouter à ta documentation, dans le style du reste du document, avec les bonnes pratiques et retours d'expérience (REX) que tu as formulés :
 
 ---
 
-### Notes complémentaires
+## ✅ Conclusion – Retours d'expérience (REX)
 
-* Le port utilisé par Render est `10000`. Il doit être explicitement défini dans la commande de démarrage de `uvicorn`.
-* Le fichier `gcp.json` est monté comme fichier secret et doit être référencé via la variable `GOOGLE_APPLICATION_CREDENTIALS`.
+### 🧠 Leçons apprises
+
+#### 1. **Optimisation de la taille des images et des modèles**
+
+* Pour rester dans les quotas du **free tier** (Render, Cloud Run, Cloud Functions), il faut **absolument compresser les modèles** et limiter les dépendances.
+* La taille des containers est cruciale : `Render` limite à **512MB**, `Cloud Functions` à **2GB**.
+* La meilleure architecture trouvée ici est un **déploiement via Cloud Run avec 4Gi de mémoire**, réparti entre **deux backends distincts** :
+
+  * `regmodel-api`
+  * `classmodel-api`
+* Un seul backend pour tout ? Trop lourd. Deux microservices = déploiements plus efficaces.
+
+#### 2. **Architecture de chargement des modèles**
+
+* Initialement, les modèles étaient chargés directement depuis **Streamlit Cloud**. Résultat : trop lent, trop fragile.
+* Ensuite, les modèles étaient **chargés à chaque prédiction via API**. Trop coûteux, notamment si plusieurs modèles doivent être disponibles.
+* Solution optimale :
+
+  * **Chargement des "best models" dès le démarrage du container**
+  * Possibilité de les **actualiser dynamiquement** via un endpoint `/refresh_model`
+  * Les modèles sont stockés dans un **bucket GCS centralisé** et lus à chaque démarrage du backend (prod ou dev)
+
+#### 3. **Développement et DevOps**
+
+* L'aller-retour **dev/prod** est essentiel. Pouvoir reproduire un comportement localement avec `docker compose`, `curl` et `FastAPI` est une immense aide.
+* Les temps de build/déploiement sur Cloud Run ou Render sont **très longs**. Il faut tester **un maximum de logique en local** pour éviter les frustrations.
+* Les requêtes `curl` avec des JSON de test sont **indispensables** pour itérer vite et valider l'API sans dépendre du front.
+
+---

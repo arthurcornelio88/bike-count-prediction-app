@@ -23,6 +23,7 @@ gcp.json
 backend/cloud_run/gcp.json
 backend/render/gcp.json
 backend/cloud_run/.env
+backend/render/.env
 secrets.toml
 mlflow-trainer.json
 mlflow-ui-access.json
