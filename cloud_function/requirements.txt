@@ -1,9 +1,0 @@
-joblib
-google-auth
-google-cloud-storage==2.3.0
-pydantic>=2.0.0 
-pandas>=2.2.3
-scikit-learn>=1.6.1
-tensorflow-cpu>=2.13.0
-uvicorn>=0.34.2
-fastapi>=0.102.0

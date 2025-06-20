@@ -187,7 +187,7 @@ class AffluenceClassifierPipeline:
         os.makedirs(dir_path, exist_ok=True)
         joblib.dump(self.cleaner, os.path.join(dir_path, "cleaner.joblib"))
         joblib.dump(self.label_encoder, os.path.join(dir_path, "label_encoder.joblib"))
-        joblib.dump(self.model, os.path.join(dir_path, "model.joblib"))
+        joblib.dump(self.model, os.path.join(dir_path, "model.joblib"), compress=3)
 
         scores = self.evaluate()
         summary = {
@@ -208,7 +208,8 @@ class AffluenceClassifierPipeline:
         instance = cls()
         instance.cleaner = joblib.load(os.path.join(dir_path, "cleaner.joblib"))
         instance.label_encoder = joblib.load(os.path.join(dir_path, "label_encoder.joblib"))
-        instance.model = joblib.load(os.path.join(dir_path, "model.joblib"))
+        instance.model = joblib.load(os.path.join(dir_path, "model.joblib"), mmap_mode='r')
+
         return instance
 
 
