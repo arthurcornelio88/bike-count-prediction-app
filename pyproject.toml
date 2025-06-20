@@ -3,24 +3,24 @@ name = "ds-traffic-cycliste1"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.12"
 dependencies = [
-    "fastapi>=0.115.12",
+    "fastapi==0.115.12",
     "folium>=0.20.0",
     "fsspec>=2025.5.0",
     "gcsfs>=2025.5.0.post1",
     "ipykernel>=6.29.5",
     "matplotlib>=3.10.3",
     "mlflow==2.22.0",
-    "numpy>=2.0.2",
+    "numpy",
     "pandas>=2.2.3",
     "pillow>=11.2.1",
     "plotly>=6.1.2",
     "pyngrok>=7.2.8",
-    "scikit-learn==1.6.1",
+    "scikit-learn>=1.6.1",
     "seaborn>=0.13.2",
     "streamlit>=1.45.1",
     "streamlit-folium>=0.25.0",
-    "tensorflow-cpu==2.13.0",
+    "tensorflow-cpu>=2.13.0",
     "uvicorn>=0.34.2",
 ]
