@@ -668,9 +668,10 @@ elif selection == "Démo":
                 if model_type == "rf_class":
                     st.success("📊 Affluence détectée ✅" if pred == 1 else "📉 Faible fréquentation attendue")
                 else:
-                    pred = result["predictions"][0][0]
+                    # gère les deux cas : [val] ou [[val]]
+                    pred = pred[0] if isinstance(pred, (list, tuple)) else pred
                     st.success(f"🧾 Prédiction du comptage horaire : **{round(float(pred))} vélos**")
-        
+    
         with st.expander("🩺 Debug API"):
             if st.button("🔁 Forcer ping API"):
                 try:

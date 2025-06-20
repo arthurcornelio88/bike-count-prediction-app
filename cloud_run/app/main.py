@@ -41,7 +41,7 @@ async def load_model():
             model_type="rf_class",
             metric="f1_score",
             summary_path=summary_path,
-            env=os.getenv("ENV", "dev").lower()
+            env="prod" # os.getenv("ENV", "dev").lower()
         )
 
         print("✅ Modèle 'rf_class' préchargé avec succès.")
