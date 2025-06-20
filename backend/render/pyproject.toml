@@ -1,5 +1,5 @@
 [project]
-name = "ds-traffic-cycliste1"
+name = "ds-traffic-cycliste1-backend-render"
 version = "0.1.0"
 description = "Render backend requirements"
 readme = "README.md"
@@ -10,12 +10,6 @@ dependencies = [
     "gcsfs>=2025.5.0.post1",
     "pandas>=2.2.3",
     "scikit-learn>=1.6.1",
-
     "tensorflow-cpu>=2.13.0",
     "uvicorn>=0.34.2",
-]
-
-[tool.uv.workspace]
-members = [
-    "backend/render",
 ]

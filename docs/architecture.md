@@ -45,7 +45,7 @@ Ce projet prédit le **comptage horaire de vélos à Paris** à partir de donné
 ### 📦 Entraînement complet via :
 
 ```bash
-python app/train.py --env prod
+python src/train.py --env prod
 ```
 
 * Enregistre chaque run dans MLflow
