@@ -3,13 +3,13 @@ name = "ds-traffic-cycliste1-backend-render"
 version = "0.1.0"
 description = "Render backend requirements"
 readme = "README.md"
-requires-python = "==3.11.8"
+requires-python = ">=3.12,<3.13"
 dependencies = [
     "fastapi==0.115.12",
     "fsspec>=2025.5.0",
     "gcsfs>=2025.5.0.post1",
     "pandas>=2.2.3",
     "scikit-learn==1.6.1",
-    "tensorflow ==2.15.0",
+    "tensorflow-cpu >=2.16,<2.20",
     "uvicorn>=0.34.2",
 ]
