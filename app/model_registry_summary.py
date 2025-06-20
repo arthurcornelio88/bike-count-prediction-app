@@ -6,6 +6,7 @@ import datetime
 from urllib.request import urlopen
 import app.app_config as _  # forcer le sys.path side effect
 from app.classes import RFPipeline, NNPipeline, AffluenceClassifierPipeline
+from google.cloud import storage
 
 
 
@@ -73,7 +74,8 @@ def get_best_model_from_summary(
     summary_path: str,
     env: str = "prod",
     metric: str = "rmse",
-    test_mode: Optional[bool] = False # True pour test, False pour prod
+    test_mode: Optional[bool] = False,
+    download_dir: Optional[str] = None  # 🔧 NOUVEAU
 ):
     if summary_path.startswith("gs://"):
         summary = _read_gcs_json(summary_path)
@@ -114,7 +116,12 @@ def get_best_model_from_summary(
     value = best.get(metric, "N/A")
     print(f"✅ Modèle {model_type} sélectionné : {best.get('run_id', 'N/A')} ({metric}={value})")
 
-    local_model_path = _download_gcs_dir(best["model_uri"], prefix=model_type)
+    local_model_path = _download_gcs_dir(
+        best["model_uri"], 
+        prefix=model_type, 
+        destination_dir=download_dir  # 🔧 on transmet à _download_gcs_dir
+    )
+
     print(f"⏳ Étape 4 – Chargement du modèle depuis {local_model_path}")
 
     # 🔎 Recherche automatique du sous-dossier portant le nom du modèle (ex: rf_class)
@@ -139,11 +146,10 @@ def get_best_model_from_summary(
 
 
 # === Téléchargement GCS vers /tmp
-def _download_gcs_dir(gcs_uri: str, prefix="model") -> str:
-    from google.cloud import storage
+def _download_gcs_dir(gcs_uri: str, prefix="model", destination_dir: Optional[str] = None) -> str:
 
     bucket_name, path = gcs_uri.replace("gs://", "").split("/", 1)
-    local_tmp_dir = f"/tmp/{prefix}_{uuid.uuid4().hex}"
+    local_tmp_dir = destination_dir or f"/tmp/{prefix}_{uuid.uuid4().hex}"
     os.makedirs(local_tmp_dir, exist_ok=True)
 
     client = storage.Client()
