@@ -11,17 +11,22 @@ from app.custom_model_registry_summary import get_best_model_from_summary
 # === Initialisation FastAPI ===
 app = FastAPI()
 
+
 # === Chargement des credentials GCP (prod ou dev) ===
 def setup_credentials():
+    if os.getenv("GOOGLE_APPLICATION_CREDENTIALS") and os.path.exists(os.getenv("GOOGLE_APPLICATION_CREDENTIALS")):
+        print("✅ Credentials déjà présents (local / montés)")
+        return
+
     key_json = os.getenv("GCP_JSON_CONTENT")
     if not key_json:
-        raise EnvironmentError("❌ GCP_JSON_CONTENT introuvable")
+        raise EnvironmentError("❌ GCP credentials non trouvés dans GCP_JSON_CONTENT ni via GOOGLE_APPLICATION_CREDENTIALS")
+
     cred_path = "/tmp/gcp_creds.json"
     with open(cred_path, "w") as f:
         f.write(key_json)
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_path
-    print("✅ Credentials chargés en PROD")
-
+    print("✅ Credentials injectés via GCP_JSON_CONTENT")
 
 # === Cache du modèle ===
 loaded_model = None
@@ -31,9 +36,9 @@ loaded_model = None
 async def load_model():
     global loaded_model
     print("🚀 Startup init")
+    setup_credentials()
 
     try:
-        setup_credentials()
         summary_path = "gs://df_traffic_cyclist1/models/summary.json"
         print(f"📄 Lecture du résumé : {summary_path}")
 
@@ -76,7 +81,6 @@ def predict(data: PredictRequest):
 def refresh_model():
     global loaded_model
     try:
-        setup_credentials()
         summary_path = "gs://df_traffic_cyclist1/models/summary.json"
         loaded_model = get_best_model_from_summary(
             model_type="rf_class",

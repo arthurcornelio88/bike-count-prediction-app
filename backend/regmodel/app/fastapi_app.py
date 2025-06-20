@@ -10,11 +10,21 @@ from app.model_registry_summary import get_best_model_from_summary
 
 app = FastAPI()
 
-# === Gestion des credentials GCP ===
-GCP_CREDENTIAL_PATH = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
-if not GCP_CREDENTIAL_PATH or not os.path.exists(GCP_CREDENTIAL_PATH):
-    raise EnvironmentError("❌ GCP credentials non trouvés ou GOOGLE_APPLICATION_CREDENTIALS non définie.")
-os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = GCP_CREDENTIAL_PATH
+def setup_credentials():
+    if os.getenv("GOOGLE_APPLICATION_CREDENTIALS") and os.path.exists(os.getenv("GOOGLE_APPLICATION_CREDENTIALS")):
+        print("✅ Credentials déjà présents (local / montés)")
+        return
+
+    key_json = os.getenv("GCP_JSON_CONTENT")
+    if not key_json:
+        raise EnvironmentError("❌ GCP credentials non trouvés dans GCP_JSON_CONTENT ni via GOOGLE_APPLICATION_CREDENTIALS")
+
+    cred_path = "/tmp/gcp_creds.json"
+    with open(cred_path, "w") as f:
+        f.write(key_json)
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = cred_path
+    print("✅ Credentials injectés via GCP_JSON_CONTENT")
+
 
 # === Cache global des modèles ===
 model_cache = {}
@@ -51,6 +61,7 @@ def get_cached_model(model_type: str, metric: str):
 # === Chargement anticipé au démarrage ===
 @app.on_event("startup")
 def preload_models():
+    setup_credentials()
     print("🚀 Préchargement des modèles...")
     for model_type, metric in [("rf", "r2"), ("nn", "r2")]:
         try:
