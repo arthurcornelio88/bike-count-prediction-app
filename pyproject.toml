@@ -25,3 +25,8 @@ dependencies = [
     "tensorflow-cpu>=2.13.0",
     "uvicorn>=0.34.2",
 ]
+
+[tool.uv.workspace]
+members = [
+    "backend/render",
+]
