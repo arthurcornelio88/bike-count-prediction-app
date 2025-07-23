@@ -22,16 +22,16 @@ A lightweight, production-ready ML app to predict **hourly bicycle traffic** in 
 
 ```mermaid
 graph TD
-  A[User Input / CSV] --> B[Streamlit App]
-  B --> C[summary.json in GCS]
-  C --> D[Download model from GCS]
-  D --> E[Predict & Return Results]
+  A[User Input / CSV]-->B[Streamlit App]
+  B-->C[summary.json in GCS]
+  C-->D[Download model from GCS]
+  D-->E[Predict & Return Results]
 
   subgraph Offline Training
     F[train.py]
-    F --> G[Train model (RF/NN/Class)]
-    G --> H[Export to GCS]
-    G --> I[Update summary.json]
+    F-->G[Train model (RF/NN/Class)]
+    G-->H[Export to GCS]
+    G-->I[Update summary.json]
   end
 ```
 
