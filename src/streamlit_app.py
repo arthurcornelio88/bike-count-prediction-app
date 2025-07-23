@@ -697,11 +697,11 @@ elif selection == "Démo":
 
     # === Page CSV ===
     elif page == "📂 Prédiction CSV batch":
-        st.header("Prédiction sur fichier CSV brut")
+        st.header("Prédiction sur fichier CSV brut (en construction...)")
         uploaded_file = st.file_uploader("Chargez un fichier brut (.csv)", type="csv")
 
         if uploaded_file is not None:
-            df_csv = pd.read_csv(uploaded_file)
+            df_csv = pd.read_csv(uploaded_file, sep=";")
             payload = {
                 "records": df_csv.to_dict(orient="records"),
                 "model_type": model_type,
