@@ -13,8 +13,8 @@ This project uses **pytest** for automated testing of ML pipelines, preprocessin
 ```
 tests/
 ├── conftest.py              # Shared fixtures and configuration
-├── test_pipelines.py        # ML pipeline tests (RF, NN)
-├── test_preprocessing.py    # Transformer tests (TODO)
+├── test_pipelines.py        # ML pipeline tests (RF, NN) - 13 tests ✅
+├── test_preprocessing.py    # Transformer tests - 17 tests ✅
 └── test_api_regmodel.py     # FastAPI endpoint tests (TODO)
 
 pytest.ini                   # Pytest configuration
@@ -272,18 +272,24 @@ jobs:
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | 13 |
-| **Passing** | 13 ✅ |
+| **Total tests** | 30 |
+| **Passing** | 30 ✅ |
 | **Failing** | 0 |
-| **Execution time** | ~20s |
-| **Coverage** (pipelines) | ~85% |
+| **Execution time** | ~25s |
+| **Test files** | 2 (test_pipelines.py, test_preprocessing.py) |
+| **Coverage** (estimated) | ~80-85% |
+
+**Breakdown by file**:
+- `test_pipelines.py`: 13 tests (~20s)
+- `test_preprocessing.py`: 17 tests (~5s)
 
 ### Next Steps
 
-- [ ] Add `test_preprocessing.py` (transformers)
 - [ ] Add `test_api_regmodel.py` (FastAPI endpoints)
 - [ ] Add `test_model_registry.py` (summary.json logic)
-- [ ] Reach 80% overall coverage
+- [ ] Run coverage report: `pytest tests/ --cov=src --cov=app --cov-report=html`
+- [ ] Add tests after grafana, prometheus, new apis, etc (TODO in the end of the great work)
+- [ ] Reach >80% overall coverage
 
 ---
 
@@ -298,10 +304,10 @@ jobs:
 ## ✅ Checklist
 
 - [x] `test_pipelines.py` created (13 tests)
+- [x] `test_preprocessing.py` created (17 tests)
 - [x] `conftest.py` with shared fixtures
 - [x] `pytest.ini` configuration
-- [x] All tests passing locally
+- [x] All 30 tests passing locally
 - [ ] GitHub Actions CI configured
-- [ ] Coverage >80%
+- [ ] Coverage report generated (>80%)
 - [ ] API tests added
-- [ ] Preprocessing tests added
