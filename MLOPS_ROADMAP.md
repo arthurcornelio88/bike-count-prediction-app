@@ -21,79 +21,51 @@
 
 ### **Phase 2 : Tests, CI & Data Versioning**
 
-#### **2.1 Data Versioning avec DVC** (`feat/mlops-dvc-data-versioning`)
+#### **2.1 Data Versioning with DVC** (`feat/mlops-dvc-data-versioning`) ✅
 
-**Objectifs** :
-- Versionner les datasets avec DVC (Data Version Control)
-- Split temporel : données **reference** (train/test) vs **current** (production)
-- Utiliser `reference` pour l'entraînement
-- Utiliser `current` pour la détection de drift
+**Objectives**:
+- Version datasets with DVC (Data Version Control)
+- Temporal split: **reference** (train/test) vs **current** (production)
+- Use `reference` for training
+- Use `current` for drift detection
 
-**Workflow** :
-1. **Installation DVC + configuration GCS**
-   ```bash
-   pip install dvc[gs]
-   dvc init
-   dvc remote add -d gcs_storage gs://df_traffic_cyclist1/dvc-storage
-   dvc remote modify gcs_storage credentialpath ./gcp.json
-   ```
+**Implementation completed** ✅
 
-2. **Split temporel des données**
-   ```python
-   # scripts/split_data_temporal.py
-   import pandas as pd
-   from datetime import datetime
+📚 **Full documentation**: [docs/dvc.md](docs/dvc.md)
 
-   # Charger données complètes
-   df = pd.read_csv("data/comptage-velo-donnees-compteurs.csv", sep=";")
-   df['date'] = pd.to_datetime(df['Date et heure de comptage'])
+**Quick summary**:
+```bash
+# 1. Install DVC with GCS support
+uv add dvc-gs
 
-   # Split temporel : avant/après 2025-09-01
-   cutoff_date = datetime(2025, 9, 1)
+# 2. Initialize DVC
+dvc init
+dvc remote add -d gcs_storage gs://df_traffic_cyclist1/dvc-storage
+dvc remote modify gcs_storage credentialpath ./mlflow-trainer.json
 
-   df_reference = df[df['date'] < cutoff_date]  # Pour train/test
-   df_current = df[df['date'] >= cutoff_date]   # Pour drift detection
+# 3. Create temporal split (70/30)
+python scripts/split_data_temporal.py
 
-   # Sauvegarder
-   df_reference.to_csv("data/reference_data.csv", index=False)
-   df_current.to_csv("data/current_data.csv", index=False)
-   ```
+# 4. Track with DVC
+dvc add data/reference_data.csv
+dvc add data/current_data.csv
 
-3. **Versionner avec DVC**
-   ```bash
-   dvc add data/reference_data.csv
-   dvc add data/current_data.csv
-   dvc push
+# 5. Push to GCS
+export GOOGLE_APPLICATION_CREDENTIALS=./mlflow-trainer.json
+dvc push
 
-   git add data/reference_data.csv.dvc data/current_data.csv.dvc .dvc/config
-   git commit -m "feat: add DVC data versioning with temporal split"
-   ```
-
-4. **Fichier `.dvc/config`**
-   ```ini
-   [core]
-       remote = gcs_storage
-   ['remote "gcs_storage"']
-       url = gs://df_traffic_cyclist1/dvc-storage
-       credentialpath = ./gcp.json
-   ```
-
-**Livrables** :
-```
-data/
-├── reference_data.csv.dvc         # Pointer DVC
-├── current_data.csv.dvc           # Pointer DVC
-├── .gitignore                     # data/*.csv (sauf .dvc)
-scripts/
-├── split_data_temporal.py         # Script de split
-.dvc/
-├── config                         # Config DVC + remote GCS
-└── .gitignore
+# 6. Commit metadata
+git add data/*.dvc .dvc/config .gitignore
+git commit -m "feat: add DVC data versioning with temporal split"
 ```
 
-**Intégration avec le pipeline** :
-- **Entraînement** : utilise `dvc pull data/reference_data.csv.dvc`
-- **Drift detection** : utilise `dvc pull data/current_data.csv.dvc`
+**Deliverables** ✅:
+- ✅ `data/reference_data.csv.dvc` (660,659 rows - 69.7%)
+- ✅ `data/current_data.csv.dvc` (287,604 rows - 30.3%)
+- ✅ `.dvc/config` (GCS remote configured)
+- ✅ `scripts/split_data_temporal.py` (temporal split script)
+- ✅ `.gitignore` updated (allow `.dvc` files)
+- ✅ Data pushed to `gs://df_traffic_cyclist1/dvc-storage/`
 
 ---
 
