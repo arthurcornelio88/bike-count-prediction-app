@@ -2,4 +2,4 @@
     remote = gcs_storage
 ['remote "gcs_storage"']
     url = gs://df_traffic_cyclist1/dvc-storage
-    credentialpath = ../gcp.json
+    credentialpath = ../mlflow-trainer.json
