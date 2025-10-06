@@ -144,6 +144,9 @@ GitHub Actions displays a test summary in the workflow run UI showing:
 
 ## Viewing CI Results
 
+In our repo, here's an output of a succeeded worker run:
+
+![CI Results](img/ci_results.png)
 ### 1. GitHub Actions Tab
 
 Navigate to: **Repository → Actions → MLOps CI Tests**

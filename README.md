@@ -2,6 +2,8 @@
 
 ### (Streamlit + MLflow + GCS + Custom Registry)
 
+[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/arthurcornelio88/bike-count-prediction-app/ci.yml?branch=master&label=CI%20Tests&logo=github&style=flat-square)](https://github.com/arthurcornelio88/bike-count-prediction-app/actions)
+
 A lightweight, production-ready ML app to predict **hourly bicycle traffic** in Paris using a **Random Forest**, a **Neural Network**, or a **binary classifier** for affluence detection.
 
 > 👉 Try it live: [Streamlit App](https://dstrafficcyclist1.streamlit.app)
