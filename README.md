@@ -32,7 +32,7 @@ graph TD
 
   subgraph Offline Training
     F[train.py]
-    F-->G[Train model (RF/NN/Class)]
+    F-->G[Train model RF/NN/Class]
     G-->H[Export to GCS]
     G-->I[Update summary.json]
   end
