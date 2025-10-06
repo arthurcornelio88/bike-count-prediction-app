@@ -19,10 +19,17 @@ dependencies = [
     "pillow>=11.2.1",
     "plotly>=6.1.2",
     "pyngrok>=7.2.8",
+    "pytest>=8.4.2",
+    "pytest-cov>=7.0.0",
     "scikit-learn>=1.6.1",
     "seaborn>=0.13.2",
     "streamlit>=1.45.1",
     "streamlit-folium>=0.25.0",
     "tensorflow-cpu>=2.13.0",
     "uvicorn>=0.34.2",
+]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
 ]

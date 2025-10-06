@@ -1,0 +1,26 @@
+[run]
+source = app
+omit =
+    */tests/*
+    */conftest.py
+    */__pycache__/*
+    */venv/*
+    */.venv/*
+
+[report]
+# Exclude legacy classifier from coverage (not tested)
+exclude_lines =
+    # Standard excludes
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstractmethod
+
+precision = 2
+show_missing = True
+
+[html]
+directory = htmlcov

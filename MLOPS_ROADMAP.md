@@ -23,129 +23,117 @@
 
 #### **2.1 Data Versioning with DVC** (`feat/mlops-dvc-data-versioning`) ✅
 
-**Objectives**:
-- Version datasets with DVC (Data Version Control)
-- Temporal split: **reference** (train/test) vs **current** (production)
-- Use `reference` for training
-- Use `current` for drift detection
-
 **Implementation completed** ✅
 
 📚 **Full documentation**: [docs/dvc.md](docs/dvc.md)
 
-**Quick summary**:
-```bash
-# 1. Install DVC with GCS support
-uv add dvc-gs
-
-# 2. Initialize DVC
-dvc init
-dvc remote add -d gcs_storage gs://df_traffic_cyclist1/dvc-storage
-dvc remote modify gcs_storage credentialpath ./mlflow-trainer.json
-
-# 3. Create temporal split (70/30)
-python scripts/split_data_temporal.py
-
-# 4. Track with DVC
-dvc add data/reference_data.csv
-dvc add data/current_data.csv
-
-# 5. Push to GCS
-export GOOGLE_APPLICATION_CREDENTIALS=./mlflow-trainer.json
-dvc push
-
-# 6. Commit metadata
-git add data/*.dvc .dvc/config .gitignore
-git commit -m "feat: add DVC data versioning with temporal split"
-```
-
 **Deliverables** ✅:
-- ✅ `data/reference_data.csv.dvc` (660,659 rows - 69.7%)
-- ✅ `data/current_data.csv.dvc` (287,604 rows - 30.3%)
-- ✅ `.dvc/config` (GCS remote configured)
-- ✅ `scripts/split_data_temporal.py` (temporal split script)
-- ✅ `.gitignore` updated (allow `.dvc` files)
-- ✅ Data pushed to `gs://df_traffic_cyclist1/dvc-storage/`
+- ✅ Temporal split: reference (660K rows, 69.7%) + current (288K rows, 30.3%)
+- ✅ DVC tracking with GCS remote storage
+- ✅ `scripts/split_data_temporal.py` implemented
 
 ---
 
-#### **2.2 Tests unitaires + CI** (`feat/mlops-tests-ci`)
+#### **2.2 Tests unitaires + CI** (`feat/mlops-tests-ci`) ✅
 
-**Objectifs** :
-- Suite de tests pytest
-- GitHub Actions CI
-- Coverage >80%
+**Implementation completed** ✅
 
-**Livrables** :
+📚 **Full documentation**:
+- [docs/pytest.md](docs/pytest.md) - Complete test suite
+- [docs/ci.md](docs/ci.md) - CI/CD with GitHub Actions + Codecov
+
+**Deliverables** ✅:
+- ✅ **47 tests** passing (13 pipelines + 17 preprocessing + 11 API + 6 registry)
+- ✅ **68% coverage** (app/classes: 73.42%, model_registry: 56.31%)
+- ✅ GitHub Actions CI configured with **UV**
+- ✅ Codecov integration active ([dashboard](https://app.codecov.io/gh/arthurcornelio88/bike-count-prediction-app))
+- ✅ Coverage artifacts (HTML reports, 30 days retention)
+
+**Files created**:
 ```
 tests/
-├── test_pipelines.py          # Tests RFPipeline, NNPipeline
-├── test_preprocessing.py      # Tests transformers
-├── test_api_regmodel.py       # Tests endpoints FastAPI
-├── conftest.py                # Fixtures partagées
-pytest.ini
-.github/
-└── workflows/
-    └── ci.yml                 # GitHub Actions
+├── test_pipelines.py          ✅ 13 tests (RF, NN)
+├── test_preprocessing.py      ✅ 17 tests (transformers)
+├── test_api_regmodel.py       ✅ 11 tests (FastAPI /predict)
+├── test_model_registry.py     ✅ 6 tests (summary.json logic)
+├── conftest.py                ✅ Shared fixtures
+pytest.ini                     ✅ Configuration
+.github/workflows/ci.yml       ✅ GitHub Actions
+.coveragerc                    ✅ Coverage config
 ```
 
-**GitHub Actions CI** :
+---
+
+#### **2.3 Backend API `/train` + MLflow Integration** (`feat/mlops-tests-ci`) ✅
+
+**Implementation completed** ✅
+
+📚 **Documentation**: [docs/backend.md](docs/backend.md#train---train-and-upload-model)
+
+**Objectifs** :
+- ✅ Refactor training logic into unified `train_model()` function
+- ✅ Create FastAPI `/train` endpoint for remote training
+- ✅ Integrate MLflow tracking in docker-compose stack
+- ✅ Support DVC-tracked datasets (reference/current)
+- ✅ Automatic GCS upload + `summary.json` update
+
+**Deliverables** ✅:
+- ✅ `train_model()` function in [train.py:256](backend/regmodel/app/train.py#L256)
+- ✅ `/train` endpoint in [fastapi_app.py:101](backend/regmodel/app/fastapi_app.py#L101)
+- ✅ Docker Compose with RegModel API + MLflow server
+- ✅ UV-optimized Dockerfile ([backend/regmodel/Dockerfile](backend/regmodel/Dockerfile))
+- ✅ Dedicated pyproject.toml for RegModel service
+- ✅ MLflow tracking already integrated in `train_rf()`, `train_nn()`, `train_rfc()`
+
+**Architecture**:
 ```yaml
-# .github/workflows/ci.yml
-name: MLOps CI
+services:
+  mlflow:
+    - Tracking server on port 5000
+    - Backend store: ./mlruns_dev
+    - Artifacts: ./mlflow_artifacts
+    - Healthcheck enabled
 
-on:
-  push:
-    branches: [ feat/*, master ]
-  pull_request:
-    branches: [ master ]
-
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.12'
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pytest pytest-cov httpx
-
-      - name: Run tests
-        run: pytest tests/ -v --cov=src --cov=app --cov-report=xml
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
+  regmodel-backend:
+    - FastAPI on port 8000
+    - Depends on MLflow (healthcheck)
+    - Mounts: code, GCS credentials, data
+    - Hot reload enabled (dev mode)
 ```
 
-**Tests clés** :
-```python
-# tests/test_pipelines.py
-def test_rf_pipeline_fit_predict():
-    X, y = load_sample_data()
-    rf = RFPipeline()
-    rf.fit(X, y)
-    preds = rf.predict(X[:10])
-    assert len(preds) == 10
+**API Usage**:
+```bash
+# Train RF model on reference data
+curl -X POST "http://localhost:8000/train" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_type": "rf",
+    "data_source": "reference",
+    "env": "prod"
+  }'
 
-# tests/test_api_regmodel.py
-from fastapi.testclient import TestClient
-from backend.regmodel.app.fastapi_app import app
-
-client = TestClient(app)
-
-def test_predict_endpoint():
-    response = client.post("/predict", json={
-        "records": [...],
-        "model_type": "rf",
-        "metric": "r2"
-    })
-    assert response.status_code == 200
-    assert "predictions" in response.json()
+# Response includes: run_id, metrics, model_uri
 ```
+
+**Supported models**:
+- `rf`: Random Forest regressor
+- `nn`: Neural Network regressor
+- `rf_class`: Random Forest classifier (affluence detection)
+
+**Métriques trackées** (aligné avec `summary.json`) :
+- **Régression (RF, NN)** : `r2_train`, `rmse_train`
+- **Classification (RFC)** : `accuracy`, `precision`, `recall`, `f1_score`
+- **Hyperparams** :
+  - RF: `n_estimators`, `max_depth`, `random_state`
+  - NN: `embedding_dim`, `batch_size`, `epochs`, `total_params`
+
+**Validation completed** ✅:
+- ✅ Full stack tested: `docker compose up` works
+- ✅ MLflow UI accessible at http://localhost:5000
+- ✅ `/train` endpoint tested with RF, NN models
+- ✅ Test mode (`test_mode=true`) working with `test_sample.csv` (6s for NN, ~30s for RF)
+- ✅ Metrics correctly returned in API response (RMSE, R²)
+- ✅ MLflow tracking confirmed (runs, metrics, tags, artifacts)
 
 ---
 

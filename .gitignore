@@ -9,6 +9,13 @@ wheels/
 # Virtual environments
 .venv
 
+# Testing and coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+coverage.xml
+
 # data (ignore CSV files but allow .dvc metadata)
 data/*.csv
 data/*.parquet

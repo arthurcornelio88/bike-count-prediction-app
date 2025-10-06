@@ -1,10 +1,56 @@
-version: "3.9"
-
 services:
+  # ========================================
+  # MLflow Tracking Server
+  # ========================================
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.22.0
+    container_name: mlflow-server
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlruns_dev:/mlflow/mlruns
+      - ./mlflow_artifacts:/mlflow/artifacts
+      - ./gcp.json:/mlflow/gcp.json:ro
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/mlflow/gcp.json
+    command: >
+      mlflow server
+      --backend-store-uri file:///mlflow/mlruns
+      --default-artifact-root file:///mlflow/artifacts
+      --host 0.0.0.0
+      --port 5000
+
+  # ========================================
+  # RegModel API (main service)
+  # ========================================
+  regmodel-backend:
+    build:
+      context: backend/regmodel
+      dockerfile: Dockerfile
+    container_name: regmodel-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - backend/regmodel/.env
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp.json
+    volumes:
+      - ./backend/regmodel/app:/app/app  # Mount only app code for hot reload
+      - ./gcp.json:/app/gcp.json:ro
+      - ./data:/app/data:ro
+    depends_on:
+      - mlflow
+    command: ["/app/.venv/bin/uvicorn", "app.fastapi_app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+  # ========================================
+  # ClassModel API (Legacy - kept for reference)
+  # ========================================
   classmodel-backend:
     build:
       context: backend/classmodel
       dockerfile: Dockerfile
+    container_name: classmodel-api
     ports:
       - "8080:8080"
     env_file:
@@ -12,17 +58,6 @@ services:
     volumes:
       - ./backend/classmodel:/app
       - ./backend/classmodel/gcp.json:/tmp/gcp_creds.json:ro
-
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
-
-  regmodel-backend:
-    build:
-      context: backend/regmodel
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    env_file:
-      - backend/regmodel/.env
-    volumes:
-      - ./backend/regmodel:/app
-    command: ["uvicorn", "app.fastapi_app:app", "--host", "0.0.0.0", "--port", "8000"]
+    profiles:
+      - legacy  # Only starts with: docker compose --profile legacy up
