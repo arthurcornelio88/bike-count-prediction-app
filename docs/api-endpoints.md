@@ -172,8 +172,8 @@ curl -X POST "http://localhost:8000/train" \
   "model_type": "rf",
   "run_id": "rf_20251006_143025",
   "metrics": {
-    "r2": "tracked",
-    "rmse": "tracked"
+    "rmse": 47.28,
+    "r2": 0.7920
   },
   "model_uri": "gs://df_traffic_cyclist1/models/rf/"
 }
@@ -242,10 +242,25 @@ curl -X POST "http://localhost:8000/train" \
 ```
 
 **Benefits:**
-- ⚡ **30 seconds** for RF (vs 2-5 minutes full training)
+- ⚡ **6-30 seconds** (NN: ~6s, RF: ~30s) vs 2-5 minutes full training
 - 🧪 Perfect for testing API integration
 - 🏷️ Tagged in MLflow with `test_mode=True`
-- 📊 Uses 1000 random samples instead of full dataset
+- 📊 Uses pre-generated `test_sample.csv` (1000 rows, ~1MB) instead of full dataset (980MB)
+- 💾 Avoids loading massive files in memory
+
+**Example response:**
+```json
+{
+  "status": "success",
+  "model_type": "nn",
+  "run_id": "nn_20251006_200409",
+  "metrics": {
+    "rmse": 76.17,
+    "r2": 0.4676
+  },
+  "model_uri": "gs://df_traffic_cyclist1/models/nn/"
+}
+```
 
 ---
 
