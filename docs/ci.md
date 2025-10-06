@@ -211,7 +211,9 @@ Our project is integrated with Codecov and shows **68.00% coverage**:
 
 ![Codecov Coverage Dashboard](img/codecov_coverage.png)
 
-**Live dashboard**: [https://app.codecov.io/gh/arthurcornelio88/bike-count-prediction-app](https://app.codecov.io/gh/arthurcornelio88/bike-count-prediction-app)
+**Live dashboard**:
+- **Current branch (feat/mlops-tests-ci)**: [codecov.io/gh/arthurcornelio88/bike-count-prediction-app/tree/feat/mlops-tests-ci](https://app.codecov.io/gh/arthurcornelio88/bike-count-prediction-app/tree/feat/mlops-tests-ci)
+- **All branches**: [codecov.io/gh/arthurcornelio88/bike-count-prediction-app](https://app.codecov.io/gh/arthurcornelio88/bike-count-prediction-app)
 
 ### 📈 Coverage Breakdown
 
@@ -249,72 +251,20 @@ Our project is integrated with Codecov and shows **68.00% coverage**:
   continue-on-error: true
 ```
 
-### 🏆 Optional Enhancements
-
-**Add coverage badge to README**:
-```markdown
-[![codecov](https://codecov.io/gh/arthurcornelio88/bike-count-prediction-app/branch/master/graph/badge.svg)](https://codecov.io/gh/arthurcornelio88/bike-count-prediction-app)
-```
-
-**Configure coverage targets** (create `codecov.yml`):
-```yaml
-coverage:
-  status:
-    project:
-      default:
-        target: 70%
-        threshold: 2%
-    patch:
-      default:
-        target: 60%
-```
-
 ### 📊 Viewing Coverage
 
 **Access methods**:
-1. **Direct link**: [codecov.io/gh/arthurcornelio88/bike-count-prediction-app](https://app.codecov.io/gh/arthurcornelio88/bike-count-prediction-app)
+1. **Direct link (by branch)**:
+   - Current branch: [feat/mlops-tests-ci](https://app.codecov.io/gh/arthurcornelio88/bike-count-prediction-app/tree/feat/mlops-tests-ci)
+   - All branches: [Repository overview](https://app.codecov.io/gh/arthurcornelio88/bike-count-prediction-app)
 2. **From GitHub PR**: Click "Details" next to "codecov/project" check
-3. **From commit**: Click commit → Checks → Codecov
+3. **From commit**: Click commit → Checks → Codecov → Details
 
 **What you can see**:
 - 📁 **File tree** with color-coded coverage
 - 📈 **Trend charts** (3 months history)
 - 🔍 **Line-by-line** coverage (click on files)
 - 📊 **Components** breakdown (app vs backend)
-
----
-
-## Troubleshooting
-
-### Tests fail in CI but pass locally
-
-**Common causes**:
-- **Missing dependencies** - Run `uv sync` locally to match CI environment
-- **Environment variables** - CI doesn't have local `.env` files
-- **File paths** - Use absolute imports, not relative paths
-
-**Solution**:
-```bash
-# Reproduce CI environment locally
-uv sync
-uv run pytest tests/ -v
-```
-
-### Coverage report not generated
-
-**Check**:
-- Workflow logs for errors in "Run tests with coverage" step
-- Ensure `pytest-cov` is in dependencies (`uv add pytest-cov --dev`)
-
-### UV installation fails
-
-**Fallback to pip**:
-```yaml
-- name: Install dependencies
-  run: |
-    pip install -U pip
-    pip install -e ".[dev]"
-```
 
 ---
 
@@ -333,7 +283,7 @@ uv run pytest tests/ -v
 ## Next Steps
 
 - [ ] Add branch protection rules (require CI to pass before merge)
-- [ ] Set up Codecov integration
+- [x] Set up Codecov integration
 - [ ] Add code quality checks (linting, type checking)
 - [ ] Add deployment workflow (CD) for Cloud Run
 
