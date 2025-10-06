@@ -129,6 +129,8 @@ def train_rf(X, y, env, test_mode):
             mlflow.log_artifacts(model_dir, artifact_path="rf_model")
             print(f"✅ Modèle RF sauvegardé localement dans : {model_dir}")
 
+    return {"rmse": rmse, "r2": r2}
+
 def train_nn(X, y, env, test_mode):
     y = y.to_numpy(dtype="float32")
     run_name = f"NeuralNet_Train_{env}" + ("_TEST" if test_mode else "")
@@ -182,6 +184,7 @@ def train_nn(X, y, env, test_mode):
             mlflow.log_artifacts(model_dir, artifact_path="nn_model")
             print(f"✅ Modèle NN sauvegardé localement dans : {model_dir}")
 
+    return {"rmse": rmse, "r2": r2}
 
 
 def train_rfc(X_raw, y_unused, env, test_mode):
@@ -253,6 +256,8 @@ def train_rfc(X_raw, y_unused, env, test_mode):
         else:
             print(f"✅ Modèle RFC sauvegardé localement dans : {model_dir}")
 
+    return {"accuracy": acc, "precision": prec, "recall": rec, "f1_score": f1}
+
 def train_model(model_type: str, data_source: str = "reference", env: str = "prod", hyperparams: dict = None, test_mode: bool = False):
     """
     Train a single model and return results.
@@ -303,28 +308,28 @@ def train_model(model_type: str, data_source: str = "reference", env: str = "pro
 
     if model_type == "rf":
         # TODO: Use hyperparams if provided
-        train_rf(X, y, env, test_mode)
+        metrics = train_rf(X, y, env, test_mode)
         return {
             "run_id": "rf_" + datetime.now().strftime("%Y%m%d_%H%M%S"),
-            "metrics": {"r2": "tracked", "rmse": "tracked"},
+            "metrics": metrics,
             "model_uri": f"gs://df_traffic_cyclist1/models/rf/"
         }
 
     elif model_type == "nn":
         # TODO: Use hyperparams if provided
-        train_nn(X, y, env, test_mode)
+        metrics = train_nn(X, y, env, test_mode)
         return {
             "run_id": "nn_" + datetime.now().strftime("%Y%m%d_%H%M%S"),
-            "metrics": {"r2": "tracked", "rmse": "tracked"},
+            "metrics": metrics,
             "model_uri": f"gs://df_traffic_cyclist1/models/nn/"
         }
 
     elif model_type == "rf_class":
         df_raw = load_and_clean_data(data_path, preserve_target=True)
-        train_rfc(df_raw, None, env, test_mode)
+        metrics = train_rfc(df_raw, None, env, test_mode)
         return {
             "run_id": "rf_class_" + datetime.now().strftime("%Y%m%d_%H%M%S"),
-            "metrics": {"accuracy": "tracked", "f1_score": "tracked"},
+            "metrics": metrics,
             "model_uri": f"gs://df_traffic_cyclist1/models/rf_class/"
         }
 

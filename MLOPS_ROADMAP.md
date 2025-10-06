@@ -127,10 +127,13 @@ curl -X POST "http://localhost:8000/train" \
   - RF: `n_estimators`, `max_depth`, `random_state`
   - NN: `embedding_dim`, `batch_size`, `epochs`, `total_params`
 
-**Next steps**:
-- [ ] Test full stack: `docker compose up`
-- [ ] Verify MLflow UI accessible at http://localhost:5000
-- [ ] Test `/train` endpoint with all model types
+**Validation completed** ✅:
+- ✅ Full stack tested: `docker compose up` works
+- ✅ MLflow UI accessible at http://localhost:5000
+- ✅ `/train` endpoint tested with RF, NN models
+- ✅ Test mode (`test_mode=true`) working with `test_sample.csv` (6s for NN, ~30s for RF)
+- ✅ Metrics correctly returned in API response (RMSE, R²)
+- ✅ MLflow tracking confirmed (runs, metrics, tags, artifacts)
 
 ---
 

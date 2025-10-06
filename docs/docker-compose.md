@@ -84,14 +84,14 @@ docker compose restart regmodel-backend
 ### 1. MLflow Tracking Server
 
 **Container**: `mlflow-server`
-**Image**: `python:3.11-slim`
+**Image**: `ghcr.io/mlflow/mlflow:v2.22.0`
 **Port**: `5000`
 
 **Features**:
 - File-based backend store (`./mlruns_dev`)
 - Local artifact storage (`./mlflow_artifacts`)
 - GCS support via mounted credentials
-- Healthcheck endpoint at `/health`
+- No healthcheck (lightweight startup)
 
 **Access**:
 - UI: http://localhost:5000
@@ -136,12 +136,12 @@ MLFLOW_TRACKING_URI=http://mlflow:5000
 
 **Volumes**:
 ```yaml
-- ./backend/regmodel:/app          # Hot reload
+- ./backend/regmodel/app:/app/app   # Hot reload (app code only)
 - ./gcp.json:/app/gcp.json:ro       # GCS credentials
-- ./data:/app/data:ro               # DVC datasets
+- ./data:/app/data:ro               # DVC datasets (includes test_sample.csv)
 ```
 
-**Dependencies**: Waits for MLflow healthcheck
+**Dependencies**: Starts after MLflow (no healthcheck dependency)
 
 ---
 
@@ -170,9 +170,10 @@ ls -la gcp.json
 # Ensure data directory exists
 mkdir -p data
 
-# Pull DVC data (if needed)
-dvc pull data/reference_data.csv.dvc
-dvc pull data/current_data.csv.dvc
+# Pull DVC data (REQUIRED for training)
+dvc pull data/test_sample.csv.dvc         # For test_mode=true (1000 rows, ~1MB)
+dvc pull data/reference_data.csv.dvc      # For full training (optional, 980MB)
+dvc pull data/current_data.csv.dvc        # For drift monitoring (optional, 430MB)
 ```
 
 ### 2. Start development environment
@@ -190,13 +191,14 @@ curl http://localhost:8000/health
 # MLflow UI
 open http://localhost:5000
 
-# Train a model
+# Train a model (FAST - test mode recommended for dev)
 curl -X POST "http://localhost:8000/train" \
   -H "Content-Type: application/json" \
   -d '{
     "model_type": "rf",
     "data_source": "reference",
-    "env": "dev"
+    "env": "dev",
+    "test_mode": true
   }'
 ```
 
