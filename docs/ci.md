@@ -201,19 +201,86 @@ start htmlcov/index.html  # Windows
 
 ---
 
-## Codecov Integration (Optional)
+## Codecov Integration ✅
 
-**Setup** (if you want Codecov badges):
+**Status**: ✅ **Active and configured!**
 
-1. Sign up at [codecov.io](https://codecov.io)
-2. Connect your GitHub repository
-3. Add `CODECOV_TOKEN` to repository secrets (Settings → Secrets → Actions)
-4. Uncomment Codecov step in `ci.yml` (already present, just set `fail_ci_if_error: true`)
+### 📊 Current Coverage
 
-**Benefits**:
-- 📊 Coverage trends over time
-- 🔍 PR coverage diff (shows coverage changes)
-- 🏆 Coverage badges for README
+Our project is integrated with Codecov and shows **68.00% coverage**:
+
+![Codecov Coverage Dashboard](img/codecov_coverage.png)
+
+**Live dashboard**: [https://app.codecov.io/gh/arthurcornelio88/bike-count-prediction-app](https://app.codecov.io/gh/arthurcornelio88/bike-count-prediction-app)
+
+### 📈 Coverage Breakdown
+
+| File | Coverage | Status |
+|------|----------|--------|
+| `app/` | **73.42%** | 🟢 Good (163/222 lines covered) |
+| `backend/regmodel/app/` | **56.31%** | 🟡 Acceptable (58/103 lines covered) |
+| **Overall** | **68.00%** | 🟢 **Target met** (221/325 lines) |
+
+### 🎯 Key Features
+
+**What Codecov provides**:
+- ✅ **Coverage trends** - Track coverage over time (3 months trend: +68.00%)
+- ✅ **PR coverage diff** - See how each PR affects coverage
+- ✅ **File-level analysis** - Drill down to see which lines are covered/missed
+- ✅ **Flags & Components** - Separate coverage for different test suites
+- ✅ **YAML configuration** - Custom coverage targets and rules
+
+### 🔧 Setup (Already Done!)
+
+**Steps completed**:
+1. ✅ Signed up at [codecov.io](https://codecov.io)
+2. ✅ Connected GitHub repository
+3. ✅ Configured `.github/workflows/ci.yml` to upload coverage
+4. ✅ Coverage reports uploaded automatically on every push
+
+**Workflow integration** (lines 44-50 in `ci.yml`):
+```yaml
+- name: Upload coverage to Codecov (optional)
+  if: github.event_name == 'push'
+  uses: codecov/codecov-action@v4
+  with:
+    file: ./coverage.xml
+    fail_ci_if_error: false
+  continue-on-error: true
+```
+
+### 🏆 Optional Enhancements
+
+**Add coverage badge to README**:
+```markdown
+[![codecov](https://codecov.io/gh/arthurcornelio88/bike-count-prediction-app/branch/master/graph/badge.svg)](https://codecov.io/gh/arthurcornelio88/bike-count-prediction-app)
+```
+
+**Configure coverage targets** (create `codecov.yml`):
+```yaml
+coverage:
+  status:
+    project:
+      default:
+        target: 70%
+        threshold: 2%
+    patch:
+      default:
+        target: 60%
+```
+
+### 📊 Viewing Coverage
+
+**Access methods**:
+1. **Direct link**: [codecov.io/gh/arthurcornelio88/bike-count-prediction-app](https://app.codecov.io/gh/arthurcornelio88/bike-count-prediction-app)
+2. **From GitHub PR**: Click "Details" next to "codecov/project" check
+3. **From commit**: Click commit → Checks → Codecov
+
+**What you can see**:
+- 📁 **File tree** with color-coded coverage
+- 📈 **Trend charts** (3 months history)
+- 🔍 **Line-by-line** coverage (click on files)
+- 📊 **Components** breakdown (app vs backend)
 
 ---
 
