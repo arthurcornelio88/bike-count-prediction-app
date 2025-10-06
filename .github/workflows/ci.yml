@@ -31,10 +31,14 @@ jobs:
           uv pip install -e .
 
       - name: Run tests with pytest
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           uv run pytest tests/ -v --tb=short
 
       - name: Run tests with coverage
+        env:
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           uv run pytest tests/ \
             --cov=app.classes \
