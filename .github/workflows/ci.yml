@@ -30,17 +30,11 @@ jobs:
           uv sync
           uv pip install -e .
 
-      - name: Run tests with pytest
-        env:
-          PYTHONPATH: ${{ github.workspace }}
-        run: |
-          uv run pytest tests/ -v --tb=short
-
       - name: Run tests with coverage
         env:
           PYTHONPATH: ${{ github.workspace }}
         run: |
-          uv run pytest tests/ \
+          uv run pytest tests/ -v --tb=short \
             --cov=app.classes \
             --cov=backend.regmodel.app.model_registry_summary \
             --cov-report=term-missing \
