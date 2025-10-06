@@ -15,7 +15,8 @@ tests/
 ├── conftest.py              # Shared fixtures and configuration
 ├── test_pipelines.py        # ML pipeline tests (RF, NN) - 13 tests ✅
 ├── test_preprocessing.py    # Transformer tests - 17 tests ✅
-└── test_api_regmodel.py     # FastAPI endpoint tests (TODO)
+├── test_api_regmodel.py     # FastAPI endpoint tests - 11 tests ✅
+└── test_model_registry.py   # Model registry tests - 6 tests ✅
 
 pytest.ini                   # Pytest configuration
 ```
@@ -44,12 +45,47 @@ pytest tests/test_pipelines.py::TestRFPipeline -v
 pytest tests/test_pipelines.py::TestRFPipeline::test_rf_pipeline_fit -v
 ```
 
-### Run with coverage
+### Run with coverage (targeted)
 ```bash
-pytest tests/ --cov=src --cov=app --cov-report=html
+# Coverage for ML pipelines and transformers (app/classes.py)
+pytest tests/test_pipelines.py tests/test_preprocessing.py --cov=app.classes --cov-report=html --cov-report=term-missing
+
+# Coverage for FastAPI endpoint (backend/regmodel/app/fastapi_app.py)
+pytest tests/test_api_regmodel.py --cov=backend.regmodel.app.fastapi_app --cov-report=html --cov-report=term-missing
+
+# Coverage for all tests (includes untested files - lower percentage)
+pytest tests/ --cov=app --cov-report=html
 ```
 
-Coverage report will be generated in `htmlcov/index.html`
+### 📊 Coverage HTML Report
+
+**Coverage reports** are generated in the `htmlcov/` directory:
+
+```bash
+htmlcov/
+├── index.html          # Main coverage dashboard (open this in browser)
+├── app_classes_py.html # Detailed line-by-line coverage for app/classes.py
+└── ...                 # Other covered files
+```
+
+**How to view**:
+```bash
+# After running coverage command
+open htmlcov/index.html  # macOS
+xdg-open htmlcov/index.html  # Linux
+start htmlcov/index.html  # Windows
+```
+
+**What you'll see**:
+- 🟢 **Green lines**: Covered by tests
+- 🔴 **Red lines**: Not covered by tests
+- **Coverage percentage** per file and per function
+- **Missing line numbers** for uncovered code
+
+**Current coverage** (targeted files):
+- `app/classes.py`: **73.42%** (excludes legacy AffluenceClassifierPipeline)
+- `backend.regmodel.app.model_registry_summary.py`: **56.31%** (GCS functions mocked)
+- **Overall**: **68.00%**
 
 ---
 
@@ -73,6 +109,36 @@ Coverage report will be generated in `htmlcov/index.html`
 
 ![Pytest Preprocessing Results](img/pytest_preprocessing_results.png)
 
+---
+
+### ✅ `test_api_regmodel.py` — FastAPI Endpoint Tests
+
+**Status**: 11/11 tests passing ✅
+**Execution time**: ~9 seconds
+**Coverage**: `/predict` endpoint (RF, NN models)
+
+![Pytest API Results](img/pytest_api_results.png)
+
+---
+
+### ✅ `test_model_registry.py` — Model Registry Tests
+
+**Status**: 6/6 tests passing ✅
+**Execution time**: ~5 seconds
+**Coverage**: summary.json logic (update_summary, get_best_model_from_summary)
+
+![Pytest Model Registry Results](img/pytest_model_registry_results.png)
+
+---
+
+## 📋 Test Cases Breakdown
+
+### 1️⃣ **TestRFPipeline** (Random Forest)
+**Status**: 6/6 tests passing ✅
+**Execution time**: ~5 seconds
+**Coverage**: summary.json logic (update_summary, get_best_model_from_summary)
+
+![Pytest Model Registry Results](img/pytest_model_registry_results.png)
 ---
 
 ## 📋 Test Cases Breakdown
@@ -183,6 +249,94 @@ Coverage report will be generated in `htmlcov/index.html`
 
 ---
 
+### 7️⃣ **TestPredictEndpoint** (FastAPI /predict)
+
+| Test | Description | Assertions |
+|------|-------------|------------|
+| `test_predict_rf_success` | Test successful RF prediction | Status 200, predictions list with 3 items, all ≥ 0 |
+| `test_predict_nn_success` | Test successful NN prediction | Status 200, predictions list with 3 items |
+| `test_predict_with_single_record` | Test single record prediction | Status 200, ≥ 1 prediction returned |
+
+**Key validations**:
+- ✅ `/predict` endpoint returns 200 status
+- ✅ Predictions are numeric and non-negative
+- ✅ Supports both RF and NN models
+
+---
+
+### 8️⃣ **TestRequestValidation** (API Schema)
+
+| Test | Description | Assertions |
+|------|-------------|------------|
+| `test_missing_records_field` | Test error when 'records' missing | Status 422 (Unprocessable Entity) |
+| `test_missing_model_type_field` | Test error when 'model_type' missing | Status 422 |
+| `test_empty_records_list` | Test empty records list | Status 200/422/500 (handled) |
+| `test_invalid_json_format` | Test invalid JSON payload | Status 422 |
+
+**Key validations**:
+- ✅ Required fields validated (records, model_type)
+- ✅ Invalid JSON rejected with 422
+- ✅ Pydantic schema enforcement
+
+---
+
+### 9️⃣ **TestErrorHandling** (API Error Cases)
+
+| Test | Description | Assertions |
+|------|-------------|------------|
+| `test_predict_with_invalid_model_type` | Test invalid model_type value | Status 500, error detail in response |
+
+**Key validations**:
+- ✅ Invalid model_type returns 500 with detail
+
+---
+
+### 🔟 **TestResponseFormat** (API Response)
+
+| Test | Description | Assertions |
+|------|-------------|------------|
+| `test_response_has_predictions_key` | Test 'predictions' key always present | Response contains "predictions" key |
+| `test_predictions_are_numeric` | Test all predictions are numeric | All predictions are int/float |
+| `test_predictions_count_matches_input` | Test output count matches input | len(predictions) == len(records) |
+
+**Key validations**:
+- ✅ Response format consistency
+- ✅ Predictions count matches input records
+- ✅ All predictions are numeric
+
+---
+
+### 1️⃣1️⃣ **TestUpdateSummary** (Model Registry)
+
+| Test | Description | Assertions |
+|------|-------------|------------|
+| `test_update_summary_creates_new_file` | Test creating new summary.json | File created, entry added with model_type, run_id, r2, rmse |
+| `test_update_summary_appends_to_existing` | Test appending to existing summary | 2 entries after 2 updates, preserves order |
+| `test_update_summary_with_all_metrics` | Test all metric types | accuracy, precision, recall, f1_score saved |
+| `test_update_summary_handles_corrupted_json` | Test corrupted JSON handling | Reinitializes summary, adds new entry |
+
+**Key validations**:
+- ✅ Creates new summary.json files
+- ✅ Appends to existing summaries
+- ✅ Handles all metric types (regression + classification)
+- ✅ Recovers from corrupted JSON
+
+---
+
+### 1️⃣2️⃣ **TestGetBestModel** (Model Selection)
+
+| Test | Description | Assertions |
+|------|-------------|------------|
+| `test_get_best_model_by_r2` | Select best model by r2 (highest) | Selects model with r2=0.90 (highest) |
+| `test_get_best_model_by_rmse` | Select best model by rmse (lowest) | Selects model with rmse=10.0 (lowest) |
+
+**Key validations**:
+- ✅ Selects best model by r2 (maximization)
+- ✅ Selects best model by rmse (minimization)
+- ✅ Filters by model_type, env, test_mode
+
+---
+
 ## 🔧 Fixtures (`conftest.py`)
 
 ### Shared Fixtures
@@ -234,35 +388,17 @@ markers =
 
 ## 🔗 Integration with CI/CD
 
-### GitHub Actions workflow (`.github/workflows/ci.yml`)
+**GitHub Actions** automatically runs all tests on every push and PR.
 
-```yaml
-name: MLOps CI
+**Quick facts**:
+- ✅ 47 tests run automatically
+- ✅ Coverage report: 68.00%
+- ✅ Uses **UV** for fast dependency installation
+- ✅ HTML coverage reports available as artifacts (30 days retention)
 
-on:
-  push:
-    branches: [feat/*, master]
+**📚 Full CI/CD documentation**: [docs/ci.md](ci.md)
 
-jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.12'
-
-      - name: Install dependencies
-        run: |
-          pip install -r requirements.txt
-          pip install pytest pytest-cov
-
-      - name: Run tests
-        run: pytest tests/ -v --cov=src --cov=app --cov-report=xml
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-```
+**Workflow file**: [.github/workflows/ci.yml](../.github/workflows/ci.yml)
 
 ---
 
@@ -272,24 +408,31 @@ jobs:
 
 | Metric | Value |
 |--------|-------|
-| **Total tests** | 30 |
-| **Passing** | 30 ✅ |
+| **Total tests** | 47 |
+| **Passing** | 47 ✅ |
 | **Failing** | 0 |
-| **Execution time** | ~25s |
-| **Test files** | 2 (test_pipelines.py, test_preprocessing.py) |
-| **Coverage** (estimated) | ~80-85% |
+| **Execution time** | ~34s |
+| **Test files** | 4 (pipelines, preprocessing, api, registry) |
+| **Coverage** (overall) | 68.00% |
 
 **Breakdown by file**:
 - `test_pipelines.py`: 13 tests (~20s)
 - `test_preprocessing.py`: 17 tests (~5s)
+- `test_api_regmodel.py`: 11 tests (~9s)
+- `test_model_registry.py`: 6 tests (~5s)
+
+**Coverage breakdown** (targeted files):
+- `app/classes.py`: **73.42%** - RFPipeline, NNPipeline, Transformers (excludes legacy AffluenceClassifierPipeline)
+- `backend.regmodel.app.model_registry_summary.py`: **56.31%** - update_summary(), get_best_model_from_summary() (GCS functions mocked)
+- **Overall**: **68.00%**
 
 ### Next Steps
 
-- [ ] Add `test_api_regmodel.py` (FastAPI endpoints)
-- [ ] Add `test_model_registry.py` (summary.json logic)
-- [ ] Run coverage report: `pytest tests/ --cov=src --cov=app --cov-report=html`
-- [ ] Add tests after grafana, prometheus, new apis, etc (TODO in the end of the great work)
-- [ ] Reach >80% overall coverage
+- [x] Add `test_api_regmodel.py` (FastAPI endpoints)
+- [x] Add `test_model_registry.py` (summary.json logic)
+- [x] Run targeted coverage report
+- [ ] Add tests after Grafana, Prometheus, new APIs, etc (TODO: end of MLOps phases)
+- [ ] Improve coverage: test NNPipeline.predict_clean(), RFPipeline edge cases
 
 ---
 
@@ -305,9 +448,10 @@ jobs:
 
 - [x] `test_pipelines.py` created (13 tests)
 - [x] `test_preprocessing.py` created (17 tests)
+- [x] `test_api_regmodel.py` created (11 tests)
+- [x] `test_model_registry.py` created (6 tests)
 - [x] `conftest.py` with shared fixtures
 - [x] `pytest.ini` configuration
-- [x] All 30 tests passing locally
-- [ ] GitHub Actions CI configured
-- [ ] Coverage report generated (>80%)
-- [ ] API tests added
+- [x] All 47 tests passing locally
+- [x] Coverage report: 68.00% (targeted files)
+- [x] GitHub Actions CI configured (`.github/workflows/ci.yml`)

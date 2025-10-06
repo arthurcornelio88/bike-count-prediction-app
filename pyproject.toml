@@ -28,3 +28,8 @@ dependencies = [
     "tensorflow-cpu>=2.13.0",
     "uvicorn>=0.34.2",
 ]
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+]
