@@ -146,7 +146,7 @@ def test_predict_endpoint():
     assert response.status_code == 200
     assert "predictions" in response.json()
 ```
-
+#### 2.3 Implémentation MLFLow (local)
 ---
 
 ### **Phase 3 : Orchestration Airflow + Réentraînement intelligent** (`feat/mlops-airflow-pipeline`)
