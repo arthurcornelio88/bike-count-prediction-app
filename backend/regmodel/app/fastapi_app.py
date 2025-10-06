@@ -76,7 +76,7 @@ class PredictRequest(BaseModel):
     model_type: str
     metric: str = "r2"
 
-# === Endpoint principal ===
+# === Endpoint de prédiction ===
 @app.post("/predict")
 def predict(data: PredictRequest):
     df = pd.DataFrame(data.records)
@@ -87,3 +87,51 @@ def predict(data: PredictRequest):
         return {"predictions": y_pred.tolist()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# === Schéma de requête pour training ===
+class TrainRequest(BaseModel):
+    model_type: str  # "rf", "nn", or "rf_class"
+    data_source: str = "reference"  # "reference" or "current"
+    env: str = "prod"
+    hyperparams: dict = {}  # Optional hyperparameters
+    test_mode: bool = False  # Use small sample (1000 rows) for fast testing
+
+
+# === Endpoint d'entraînement ===
+@app.post("/train")
+def train_endpoint(request: TrainRequest):
+    """
+    Train a model and upload to GCS + summary.json.
+
+    Example request:
+    {
+        "model_type": "rf",
+        "data_source": "reference",
+        "env": "prod",
+        "hyperparams": {},
+        "test_mode": false
+    }
+    """
+    try:
+        from app.train import train_model
+
+        # Call training function
+        result = train_model(
+            model_type=request.model_type,
+            data_source=request.data_source,
+            env=request.env,
+            hyperparams=request.hyperparams,
+            test_mode=request.test_mode
+        )
+
+        return {
+            "status": "success",
+            "model_type": request.model_type,
+            "run_id": result.get("run_id"),
+            "metrics": result.get("metrics"),
+            "model_uri": result.get("model_uri")
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
