@@ -64,26 +64,73 @@ pytest.ini                     ✅ Configuration
 
 ---
 
-#### **2.3 Implémentation MLflow (local)** (`feat/mlops-mlflow-local`) 🚧
+#### **2.3 Backend API `/train` + MLflow Integration** (`feat/mlops-tests-ci`) ✅
+
+**Implementation completed** ✅
+
+📚 **Documentation**: [docs/backend.md](docs/backend.md#train---train-and-upload-model)
 
 **Objectifs** :
-- Configurer MLflow tracking server local
-- Intégrer tracking dans les pipelines RF/NN
-- Expérimentations avec hyperparamètres
-- Comparaison modèles via UI MLflow
+- ✅ Refactor training logic into unified `train_model()` function
+- ✅ Create FastAPI `/train` endpoint for remote training
+- ✅ Integrate MLflow tracking in docker-compose stack
+- ✅ Support DVC-tracked datasets (reference/current)
+- ✅ Automatic GCS upload + `summary.json` update
 
-**Deliverables** :
-- [ ] MLflow server local configuré et lancé
-- [ ] Tracking intégré dans `RFPipeline.fit()`
-- [ ] Tracking intégré dans `NNPipeline.fit()`
-- [ ] Script d'expérimentation : `scripts/train_with_mlflow.py`
-- [ ] Documentation : `docs/mlflow_local.md`
+**Deliverables** ✅:
+- ✅ `train_model()` function in [train.py:256](backend/regmodel/app/train.py#L256)
+- ✅ `/train` endpoint in [fastapi_app.py:101](backend/regmodel/app/fastapi_app.py#L101)
+- ✅ Docker Compose with RegModel API + MLflow server
+- ✅ UV-optimized Dockerfile ([backend/regmodel/Dockerfile](backend/regmodel/Dockerfile))
+- ✅ Dedicated pyproject.toml for RegModel service
+- ✅ MLflow tracking already integrated in `train_rf()`, `train_nn()`, `train_rfc()`
 
-**Métriques à tracker** (aligné avec `summary.json`) :
-- **Régression (RF, NN)** : `r2`, `rmse`
+**Architecture**:
+```yaml
+services:
+  mlflow:
+    - Tracking server on port 5000
+    - Backend store: ./mlruns_dev
+    - Artifacts: ./mlflow_artifacts
+    - Healthcheck enabled
+
+  regmodel-backend:
+    - FastAPI on port 8000
+    - Depends on MLflow (healthcheck)
+    - Mounts: code, GCS credentials, data
+    - Hot reload enabled (dev mode)
+```
+
+**API Usage**:
+```bash
+# Train RF model on reference data
+curl -X POST "http://localhost:8000/train" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_type": "rf",
+    "data_source": "reference",
+    "env": "prod"
+  }'
+
+# Response includes: run_id, metrics, model_uri
+```
+
+**Supported models**:
+- `rf`: Random Forest regressor
+- `nn`: Neural Network regressor
+- `rf_class`: Random Forest classifier (affluence detection)
+
+**Métriques trackées** (aligné avec `summary.json`) :
+- **Régression (RF, NN)** : `r2_train`, `rmse_train`
+- **Classification (RFC)** : `accuracy`, `precision`, `recall`, `f1_score`
 - **Hyperparams** :
   - RF: `n_estimators`, `max_depth`, `random_state`
-  - NN: `embedding_dim`, `batch_size`, `epochs`
+  - NN: `embedding_dim`, `batch_size`, `epochs`, `total_params`
+
+**Next steps**:
+- [ ] Test full stack: `docker compose up`
+- [ ] Verify MLflow UI accessible at http://localhost:5000
+- [ ] Test `/train` endpoint with all model types
 
 ---
 

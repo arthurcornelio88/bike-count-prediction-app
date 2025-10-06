@@ -51,9 +51,9 @@ def split_temporal_data():
     print(f"  - Current (>= {CUTOFF_DATE.date()}):  {len(df_current):,} rows ({curr_pct:.1f}%)")
     print(f"  - Total:                     {len(df):,} rows")
 
-    # Save without temporary 'date' column
-    df_reference.drop(columns=['date']).to_csv(OUTPUT_REF, index=False)
-    df_current.drop(columns=['date']).to_csv(OUTPUT_CURRENT, index=False)
+    # Save without temporary 'date' column, force semicolon separator
+    df_reference.drop(columns=['date']).to_csv(OUTPUT_REF, sep=";", index=False)
+    df_current.drop(columns=['date']).to_csv(OUTPUT_CURRENT, sep=";", index=False)
 
     print(f"\nFiles created:")
     print(f"  - {OUTPUT_REF}")
