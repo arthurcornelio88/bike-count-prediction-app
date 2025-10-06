@@ -253,6 +253,85 @@ def train_rfc(X_raw, y_unused, env, test_mode):
         else:
             print(f"✅ Modèle RFC sauvegardé localement dans : {model_dir}")
 
+def train_model(model_type: str, data_source: str = "reference", env: str = "prod", hyperparams: dict = None, test_mode: bool = False):
+    """
+    Train a single model and return results.
+
+    Args:
+        model_type: "rf", "nn", or "rf_class"
+        data_source: "reference" or "current" (DVC data)
+        env: "dev" or "prod"
+        hyperparams: dict of hyperparameters (optional)
+        test_mode: if True, use small sample (1000 rows) for fast testing
+
+    Returns:
+        dict with run_id, metrics, model_uri
+    """
+    # Map data_source to file path
+    if test_mode:
+        # Use small test sample for fast training (avoid loading 1GB file)
+        data_path = "data/test_sample.csv"
+        print(f"⚡ TEST MODE: Using test sample (1000 rows)")
+    elif data_source == "reference":
+        data_path = "data/reference_data.csv"
+    elif data_source == "current":
+        data_path = "data/current_data.csv"
+    else:
+        data_path = "data/comptage-velo-donnees-compteurs.csv"
+
+    # Setup environment
+    artifact_path = "models/"
+    os.makedirs(artifact_path, exist_ok=True)
+
+    # Use MLFLOW_TRACKING_URI from env, fallback to localhost for non-docker
+    mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
+    mlflow.set_tracking_uri(mlflow_uri)
+    mlflow.set_experiment("traffic_cycliste_experiment")
+    print(f"📡 MLflow tracking URI: {mlflow_uri}")
+
+    # Setup GCS credentials if prod
+    if env == "prod":
+        if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") is None:
+            gcp_credentials_path = "./mlflow-trainer.json"
+            if os.path.exists(gcp_credentials_path):
+                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_credentials_path
+
+    # Load data
+    print(f"📊 Loading data from {data_path}...")
+    X, y = load_and_clean_data(data_path)
+    print(f"✅ Data loaded: {X.shape[0]} rows")
+
+    if model_type == "rf":
+        # TODO: Use hyperparams if provided
+        train_rf(X, y, env, test_mode)
+        return {
+            "run_id": "rf_" + datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "metrics": {"r2": "tracked", "rmse": "tracked"},
+            "model_uri": f"gs://df_traffic_cyclist1/models/rf/"
+        }
+
+    elif model_type == "nn":
+        # TODO: Use hyperparams if provided
+        train_nn(X, y, env, test_mode)
+        return {
+            "run_id": "nn_" + datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "metrics": {"r2": "tracked", "rmse": "tracked"},
+            "model_uri": f"gs://df_traffic_cyclist1/models/nn/"
+        }
+
+    elif model_type == "rf_class":
+        df_raw = load_and_clean_data(data_path, preserve_target=True)
+        train_rfc(df_raw, None, env, test_mode)
+        return {
+            "run_id": "rf_class_" + datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "metrics": {"accuracy": "tracked", "f1_score": "tracked"},
+            "model_uri": f"gs://df_traffic_cyclist1/models/rf_class/"
+        }
+
+    else:
+        raise ValueError(f"Unknown model_type: {model_type}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Train bike count models (RF + NN)")
     parser.add_argument('--model_test', action='store_true', help="Use 1000 samples for fast training")

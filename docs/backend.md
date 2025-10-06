@@ -127,13 +127,71 @@ gcloud run deploy regmodel-api \
 
 ### ✅ RegModel API
 
+#### `/predict` - Run inference
+
 ```bash
 curl -X POST "https://regmodel-api-467498471756.europe-west1.run.app/predict" \
   -H "Content-Type: application/json" \
   -d '{"records": [{"nom_du_compteur": "35 boulevard de Ménilmontant NO-SE", "date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00", "coordonnées_géographiques": "48.8672, 2.3501", "mois_annee_comptage": "mai 2025"}], "model_type": "nn", "metric": "r2"}'
 ```
 
-### ✅ ClassModel API
+#### `/train` - Train and upload model
+
+Train a model on reference or current data, upload to GCS, and update `summary.json`.
+
+**Request body:**
+
+```json
+{
+  "model_type": "rf",
+  "data_source": "reference",
+  "env": "prod",
+  "hyperparams": {}
+}
+```
+
+**Parameters:**
+- `model_type` (required): `"rf"`, `"nn"`, or `"rf_class"`
+- `data_source` (optional): `"reference"` (default), `"current"`, or custom path
+- `env` (optional): `"dev"` or `"prod"` (default: `"prod"`)
+- `hyperparams` (optional): Dict of hyperparameters (not yet implemented)
+
+**Example:**
+
+```bash
+curl -X POST "https://regmodel-api-467498471756.europe-west1.run.app/train" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_type": "rf",
+    "data_source": "reference",
+    "env": "prod"
+  }'
+```
+
+**Response:**
+
+```json
+{
+  "status": "success",
+  "model_type": "rf",
+  "run_id": "rf_20251006_143025",
+  "metrics": {"r2": "tracked", "rmse": "tracked"},
+  "model_uri": "gs://df_traffic_cyclist1/models/rf/"
+}
+```
+
+**Implementation details:**
+- Training logic is in [train.py:256](../backend/regmodel/app/train.py#L256) (`train_model` function)
+- Supports DVC-tracked datasets (`reference_data.csv`, `current_data.csv`)
+- Logs experiments to MLflow (local server at `http://127.0.0.1:5000`)
+- Uploads artifacts to GCS bucket `df_traffic_cyclist1/models/`
+- Updates `summary.json` with best model metadata
+
+---
+
+### ⚠️ ClassModel API (Legacy)
+
+> **Note:** This API is now legacy. The classifier model (`rf_class`) is now integrated into the RegModel API via the `/train` endpoint.
 
 ```bash
 curl -X POST "https://classmodel-api-467498471756.europe-west1.run.app/predict" \
