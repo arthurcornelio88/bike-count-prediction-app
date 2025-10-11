@@ -1,0 +1,19 @@
+# Prometheus Configuration for Bike Traffic MLOps
+
+global:
+  scrape_interval: 15s  # Scrape targets every 15 seconds
+  evaluation_interval: 15s  # Evaluate rules every 15 seconds
+
+# Scrape configuration
+scrape_configs:
+  # RegModel API metrics
+  - job_name: 'regmodel-api'
+    static_configs:
+      - targets: ['regmodel-backend:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 10s
+
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
