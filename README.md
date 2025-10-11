@@ -215,7 +215,7 @@ Every push triggers automated checks:
 2. **Tests** - Unit tests with >80% coverage
 3. **Artifacts** - Coverage reports (30 days retention)
 
-See [CI/CD Documentation](docs/ci-cd.md) for details.
+See [CI Documentation](docs/ci.md) for details.
 
 ### Run Tests
 

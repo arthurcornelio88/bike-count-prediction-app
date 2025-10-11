@@ -285,6 +285,111 @@ Our project is integrated with Codecov and shows **68.00% coverage**:
 
 ---
 
+## Pre-commit Hooks
+
+### Overview
+
+Pre-commit hooks run **locally before each commit** to catch issues early. All checks that run in CI also run
+as pre-commit hooks, ensuring consistency between local and CI environments.
+
+### Installation
+
+```bash
+# Install pre-commit hooks
+uv run pre-commit install
+
+# Run manually on all files
+uv run pre-commit run --all-files
+```
+
+### Available Hooks
+
+The project uses 14 pre-commit hooks:
+
+| Hook | Purpose | Auto-fix |
+|------|---------|----------|
+| **ruff** | Python linting | ✅ Yes |
+| **ruff-format** | Python formatting | ✅ Yes |
+| **mypy** | Type checking | ❌ No |
+| **bandit** | Security scanning | ❌ No |
+| **markdownlint** | Documentation quality | ✅ Yes |
+| **trailing-whitespace** | Remove trailing spaces | ✅ Yes |
+| **end-of-file-fixer** | Fix EOF | ✅ Yes |
+| **check-yaml** | YAML syntax | ❌ No |
+| **check-json** | JSON syntax | ❌ No |
+| **check-merge-conflict** | Merge markers | ❌ No |
+| **detect-private-key** | Security check | ❌ No |
+| **check-ast** | Python syntax | ❌ No |
+| **debug-statements** | Debug imports | ❌ No |
+| **check-added-large-files** | File size | ❌ No |
+
+### CI Integration
+
+Pre-commit hooks run **before** tests in the CI pipeline:
+
+```yaml
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install UV
+        run: pip install uv
+      - name: Install dependencies
+        run: uv sync
+      - name: Run pre-commit
+        run: uv run pre-commit run --all-files
+
+  test:
+    needs: pre-commit  # Tests only run if pre-commit passes
+    # ... test steps
+```
+
+### Helper Script
+
+Use the helper script for quick checks:
+
+```bash
+# Run all checks
+./scripts/run-checks.sh
+
+# Quick mode (skip mypy, bandit)
+./scripts/run-checks.sh --quick
+
+# Auto-fix issues
+./scripts/run-checks.sh --fix
+
+# Verbose output
+./scripts/run-checks.sh --verbose
+```
+
+### Best Practices
+
+**Before committing:**
+
+1. Run pre-commit locally: `uv run pre-commit run --all-files`
+2. Fix any reported issues
+3. Commit and push
+
+**If pre-commit fails:**
+
+- **Ruff errors**: Auto-fixed, review changes with `git diff`
+- **Mypy errors**: Add type hints or use `# type: ignore` comments
+- **Bandit warnings**: Use `# nosec BXXX` for false positives
+- **Markdownlint**: Auto-fixed, or adjust `.markdownlint.yaml`
+
+### Configuration Files
+
+- `.pre-commit-config.yaml` - Pre-commit hook configuration
+- `.markdownlint.yaml` - Markdown linting rules
+- `pyproject.toml` - Ruff, mypy, bandit settings
+
+---
+
 ## Current Status
 
 | Metric | Value |
@@ -294,6 +399,7 @@ Our project is integrated with Codecov and shows **68.00% coverage**:
 | **Coverage** | 68.00% |
 | **Python** | 3.12 |
 | **Package Manager** | UV |
+| **Pre-commit Hooks** | 14/14 passing ✅ |
 
 ---
 
@@ -301,7 +407,7 @@ Our project is integrated with Codecov and shows **68.00% coverage**:
 
 - [ ] Add branch protection rules (require CI to pass before merge)
 - [x] Set up Codecov integration
-- [ ] Add code quality checks (linting, type checking)
+- [x] Add code quality checks (linting, type checking) via pre-commit
 - [ ] Add deployment workflow (CD) for Cloud Run
 
 ---
