@@ -94,6 +94,27 @@ create_monitoring_table_if_needed("datascientest-460618")
 
 ---
 
+## Upload Reference Data to GCS
+
+The DAGs need access to reference data (historical bike traffic) for drift detection and model training.
+
+### Upload reference_data.csv to GCS
+
+```bash
+# Upload reference data (934MB) to the correct path
+gsutil -m cp data/reference_data.csv gs://df_traffic_cyclist1/raw_data/reference_data.csv
+
+# Verify upload
+gsutil ls -lh gs://df_traffic_cyclist1/raw_data/
+
+# Expected output:
+# 934M  gs://df_traffic_cyclist1/raw_data/reference_data.csv
+```
+
+**Note:** This is a one-time upload. The DAG will fetch this file from GCS for drift detection in PROD mode.
+
+---
+
 ## Configuration Secret Manager
 
 ### Secrets requis pour PROD
@@ -267,50 +288,6 @@ bq ls --project_id=datascientest-460618
 #   monitoring_audit
 ```
 
-### Test 3 : Vérifier la config Airflow (DEV)
-
-```python
-# Depuis un DAG ou un script
-from utils.env_config import get_env_config
-
-config = get_env_config()
-print("🔧 Configuration DEV:")
-for key, value in config.items():
-    print(f"  {key}: {value}")
-```
-
-### Test 4 : Créer une table de test
-
-```python
-from google.cloud import bigquery
-import pandas as pd
-from datetime import datetime
-
-# Client BigQuery
-client = bigquery.Client(project="datascientest-460618")
-
-# Test data
-df = pd.DataFrame({
-    "timestamp": [datetime.utcnow()],
-    "test_value": [42]
-})
-
-# Write to BigQuery
-table_id = "datascientest-460618.bike_traffic_raw.test_table"
-df.to_gbq(
-    destination_table=table_id,
-    project_id="datascientest-460618",
-    if_exists="replace",
-    location="europe-west1"
-)
-
-print(f"✅ Test table created: {table_id}")
-
-# Clean up
-client.delete_table(table_id)
-print(f"🗑️ Test table deleted")
-```
-
 ---
 
 ## Schémas des tables
@@ -359,37 +336,10 @@ CREATE TABLE `datascientest-460618.monitoring_audit.logs` (
 
 ---
 
-## Troubleshooting
-
-### Erreur : "Permission denied" sur Secret Manager
-
-**Solution** : Vérifier les IAM permissions du Service Account :
-
-```bash
-gcloud projects add-iam-policy-binding datascientest-460618 \
-  --member="serviceAccount:467498471756-compute@developer.gserviceaccount.com" \
-  --role="roles/secretmanager.secretAccessor"
-```
-
-### Erreur : "Dataset not found"
-
-**Solution** : Créer le dataset manuellement ou laisser le DAG le créer automatiquement au premier run.
-
-### Erreur : "Invalid credentials" dans Airflow
-
-**Solution** : Vérifier que `gcp.json` est bien monté dans le container Airflow :
-
-```yaml
-# docker-compose.yaml
-volumes:
-  - ./gcp.json:/opt/airflow/gcp.json:ro
-```
-
----
-
 ## Checklist finale
 
 - [ ] 3 datasets BigQuery créés (`bike_traffic_raw`, `bike_traffic_predictions`, `monitoring_audit`)
+- [ ] Reference data uploaded to GCS (`gs://df_traffic_cyclist1/data/reference_data.csv`)
 - [ ] 7 secrets créés dans Secret Manager
 - [ ] Service Account a accès aux secrets (rôle `secretmanager.secretAccessor`)
 - [ ] Fichier `.env.airflow` créé avec variables DEV
