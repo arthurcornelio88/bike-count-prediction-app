@@ -1,11 +1,15 @@
 # 🚲 Bike Count Prediction
 
-### (Streamlit + MLflow + GCS + Custom Registry)
+## (Streamlit + MLflow + GCS + Custom Registry)
 
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/arthurcornelio88/bike-count-prediction-app/ci.yml?branch=master&label=CI%20Tests&logo=github&style=flat-square)](https://github.com/arthurcornelio88/bike-count-prediction-app/actions)
-[![codecov](https://codecov.io/gh/arthurcornelio88/bike-count-prediction-app/branch/master/graph/badge.svg)](https://codecov.io/gh/arthurcornelio88/bike-count-prediction-app)
+[![CI Tests](https://github.com/arthurcornelio88/ds_traffic_cyclist1/actions/workflows/ci.yml/badge.svg)](https://github.com/arthurcornelio88/ds_traffic_cyclist1/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/arthurcornelio88/ds_traffic_cyclist1/branch/master/graph/badge.svg)](https://codecov.io/gh/arthurcornelio88/ds_traffic_cyclist1)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
+[![type: mypy](https://img.shields.io/badge/type-mypy-blue.svg)](https://github.com/python/mypy)
 
-A lightweight, production-ready ML app to predict **hourly bicycle traffic** in Paris using a **Random Forest**, a **Neural Network**, or a **binary classifier** for affluence detection.
+A lightweight, production-ready ML app to predict **hourly bicycle traffic** in Paris using a
+**Random Forest**, a **Neural Network**, or a **binary classifier** for affluence detection.
 
 > 👉 Try it live: [Streamlit App](https://dstrafficcyclist1.streamlit.app)
 
@@ -70,7 +74,7 @@ Make sure to include:
 
 Via [https://share.streamlit.io](https://share.streamlit.io):
 
-```
+```text
 app/streamlit_app.py
 ```
 
@@ -85,7 +89,7 @@ env = "PROD"
 type = "service_account"
 project_id = "..."
 private_key_id = "..."
-private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
+private_key = "YOUR_PRIVATE_KEY_HERE"
 client_email = "..."
 ...
 ```
@@ -98,7 +102,8 @@ The app will detect and write this to `/tmp/gcp.json` automatically at runtime.
 
 ### ✅ Local `.streamlit/secrets.toml`
 
-Create a local file at `.streamlit/secrets.toml` with the same structure as above. This makes `st.secrets["gcp_service_account"]` work identically in both local and cloud environments.
+Create a local file at `.streamlit/secrets.toml` with the same structure as above. This makes
+`st.secrets["gcp_service_account"]` work identically in both local and cloud environments.
 
 ```toml
 env = "DEV"
@@ -178,6 +183,49 @@ This project uses **three separate GCP service accounts**:
 | `mlflow-trainer`      | `Storage Object Admin`  | Model training + upload      |
 | `mlflow-ui-access`    | `Storage Object Viewer` | MLflow UI display (optional) |
 | `gcp_service_account` | `Storage Object Viewer` | Inference from Streamlit     |
+
+---
+
+## 🧪 Development & Quality
+
+### Pre-commit Hooks
+
+Ensure code quality before every commit:
+
+```bash
+# Install pre-commit hooks
+uv run pre-commit install
+
+# Run manually
+uv run pre-commit run --all-files
+```
+
+**Checks performed:**
+
+* ✅ Ruff (linting & formatting)
+* ✅ MyPy (type checking)
+* ✅ Bandit (security scan)
+* ✅ YAML/JSON validation
+
+### CI/CD Pipeline
+
+Every push triggers automated checks:
+
+1. **Pre-commit** - Code quality & security
+2. **Tests** - Unit tests with >80% coverage
+3. **Artifacts** - Coverage reports (30 days retention)
+
+See [CI/CD Documentation](docs/ci-cd.md) for details.
+
+### Run Tests
+
+```bash
+# Run all tests with coverage
+uv run pytest tests/ -v --cov
+
+# Run specific test file
+uv run pytest tests/test_classes.py -v
+```
 
 ---
 

@@ -151,10 +151,11 @@ Train a model on reference or current data, upload to GCS, and update `summary.j
 ```
 
 **Parameters:**
-- `model_type` (required): `"rf"`, `"nn"`, or `"rf_class"`
-- `data_source` (optional): `"reference"` (default), `"current"`, or custom path
-- `env` (optional): `"dev"` or `"prod"` (default: `"prod"`)
-- `hyperparams` (optional): Dict of hyperparameters (not yet implemented)
+
+* `model_type` (required): `"rf"`, `"nn"`, or `"rf_class"`
+* `data_source` (optional): `"reference"` (default), `"current"`, or custom path
+* `env` (optional): `"dev"` or `"prod"` (default: `"prod"`)
+* `hyperparams` (optional): Dict of hyperparameters (not yet implemented)
 
 **Example:**
 
@@ -181,17 +182,19 @@ curl -X POST "https://regmodel-api-467498471756.europe-west1.run.app/train" \
 ```
 
 **Implementation details:**
-- Training logic is in [train.py:256](../backend/regmodel/app/train.py#L256) (`train_model` function)
-- Supports DVC-tracked datasets (`reference_data.csv`, `current_data.csv`)
-- Logs experiments to MLflow (local server at `http://127.0.0.1:5000`)
-- Uploads artifacts to GCS bucket `df_traffic_cyclist1/models/`
-- Updates `summary.json` with best model metadata
+
+* Training logic is in [train.py:256](../backend/regmodel/app/train.py#L256) (`train_model` function)
+* Supports DVC-tracked datasets (`reference_data.csv`, `current_data.csv`)
+* Logs experiments to MLflow (local server at `http://127.0.0.1:5000`)
+* Uploads artifacts to GCS bucket `df_traffic_cyclist1/models/`
+* Updates `summary.json` with best model metadata
 
 ---
 
 ### ⚠️ ClassModel API (Legacy)
 
-> **Note:** This API is now legacy. The classifier model (`rf_class`) is now integrated into the RegModel API via the `/train` endpoint.
+> **Note:** This API is now legacy. The classifier model (`rf_class`) is now integrated into the
+> RegModel API via the `/train` endpoint.
 
 ```bash
 curl -X POST "https://classmodel-api-467498471756.europe-west1.run.app/predict" \
@@ -223,9 +226,11 @@ Utiliser les URL suivantes dans le front Streamlit :
 
 #### 1. **Optimisation de la taille des images et des modèles**
 
-* Pour rester dans les quotas du **free tier** (Render, Cloud Run, Cloud Functions), il faut **absolument compresser les modèles** et limiter les dépendances.
+* Pour rester dans les quotas du **free tier** (Render, Cloud Run, Cloud Functions), il faut
+  **absolument compresser les modèles** et limiter les dépendances.
 * La taille des containers est cruciale : `Render` limite à **512MB**, `Cloud Functions` à **2GB**.
-* La meilleure architecture trouvée ici est un **déploiement via Cloud Run avec 4Gi de mémoire**, réparti entre **deux backends distincts** :
+* La meilleure architecture trouvée ici est un **déploiement via Cloud Run avec 4Gi de mémoire**,
+  réparti entre **deux backends distincts** :
 
   * `regmodel-api`
   * `classmodel-api`
@@ -233,19 +238,25 @@ Utiliser les URL suivantes dans le front Streamlit :
 
 #### 2. **Architecture de chargement des modèles**
 
-* Initialement, les modèles étaient chargés directement depuis **Streamlit Cloud**. Résultat : trop lent, trop fragile, ou sinon, crash.
-* Ensuite, les modèles étaient **chargés à chaque prédiction via API**. Trop coûteux, notamment si plusieurs modèles doivent être disponibles.
+* Initialement, les modèles étaient chargés directement depuis **Streamlit Cloud**. Résultat : trop
+  lent, trop fragile, ou sinon, crash.
+* Ensuite, les modèles étaient **chargés à chaque prédiction via API**. Trop coûteux, notamment si
+  plusieurs modèles doivent être disponibles.
 * Solution optimale :
 
   * **Chargement des "best models" dès le démarrage du container**
   * Possibilité de les **actualiser dynamiquement** via un endpoint `/refresh_model`
-  * Les modèles sont stockés dans un **bucket GCS centralisé** et lus à chaque démarrage du backend (prod ou dev)
+  * Les modèles sont stockés dans un **bucket GCS centralisé** et lus à chaque démarrage du backend
+    (prod ou dev)
 
 #### 3. **Développement et DevOps**
 
-* L'aller-retour **dev/prod** est essentiel. Pouvoir reproduire un comportement localement avec `docker compose`, `curl` et `FastAPI` est une immense aide.
-* Les temps de build/déploiement sur Cloud Run ou Render sont **très longs**. Il faut tester **un maximum de logique en local** pour éviter les frustrations.
-* Les requêtes `curl` avec des JSON de test sont **indispensables** pour itérer vite et valider l'API sans dépendre du front.
+* L'aller-retour **dev/prod** est essentiel. Pouvoir reproduire un comportement localement avec
+  `docker compose`, `curl` et `FastAPI` est une immense aide.
+* Les temps de build/déploiement sur Cloud Run ou Render sont **très longs**. Il faut tester
+  **un maximum de logique en local** pour éviter les frustrations.
+* Les requêtes `curl` avec des JSON de test sont **indispensables** pour itérer vite et valider
+  l'API sans dépendre du front.
 
 #### 4. **Gestion des environnements (DEV / PROD)**
 

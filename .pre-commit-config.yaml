@@ -40,7 +40,7 @@ repos:
       - id: mypy
         additional_dependencies: [types-requests, types-PyYAML]
         args: [--ignore-missing-imports, --no-strict-optional]
-        exclude: ^(tests/|notebooks/)
+        exclude: ^(tests/|notebooks/|backend/classmodel/)
 
   # Security checks
   - repo: https://github.com/PyCQA/bandit

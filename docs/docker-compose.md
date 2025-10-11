@@ -3,6 +3,7 @@
 ## Overview
 
 The docker-compose stack provides a complete local development environment with:
+
 - **RegModel API** (FastAPI) - port 8000
 - **MLflow Tracking Server** - port 5000
 - **ClassModel API** (Legacy) - port 8080 (optional)
@@ -11,7 +12,7 @@ The docker-compose stack provides a complete local development environment with:
 
 ## 🏗️ Architecture Diagram
 
-```
+```text
 ┌──────────────────────────────────────────────────────────┐
 │                    Docker Compose Stack                   │
 ├──────────────────────────────────────────────────────────┤
@@ -88,16 +89,19 @@ docker compose restart regmodel-backend
 **Port**: `5000`
 
 **Features**:
+
 - File-based backend store (`./mlruns_dev`)
 - Local artifact storage (`./mlflow_artifacts`)
 - GCS support via mounted credentials
 - No healthcheck (lightweight startup)
 
 **Access**:
-- UI: http://localhost:5000
-- API: http://mlflow:5000 (from containers)
+
+- UI: <http://localhost:5000>
+- API: <http://mlflow:5000> (from containers)
 
 **Volumes**:
+
 ```yaml
 - ./mlruns_dev:/mlflow/mlruns
 - ./mlflow_artifacts:/mlflow/artifacts
@@ -112,22 +116,26 @@ docker compose restart regmodel-backend
 **Port**: `8000`
 
 **Features**:
+
 - FastAPI application with hot reload
 - Integrated with MLflow tracking
 - GCS model loading/uploading
 - DVC data support
 
 **Endpoints**:
+
 - `POST /predict` - Run inference
 - `POST /train` - Train and upload model
 - `GET /health` - Health check
 
 **Access**:
-- API: http://localhost:8000
-- Docs: http://localhost:8000/docs
-- Redoc: http://localhost:8000/redoc
+
+- API: <http://localhost:8000>
+- Docs: <http://localhost:8000/docs>
+- Redoc: <http://localhost:8000/redoc>
 
 **Environment variables**:
+
 ```env
 ENV=DEV
 GOOGLE_APPLICATION_CREDENTIALS=/app/gcp.json
@@ -135,6 +143,7 @@ MLFLOW_TRACKING_URI=http://mlflow:5000
 ```
 
 **Volumes**:
+
 ```yaml
 - ./backend/regmodel/app:/app/app   # Hot reload (app code only)
 - ./gcp.json:/app/gcp.json:ro       # GCS credentials
@@ -208,7 +217,7 @@ The regmodel service has hot reload enabled, so code changes are reflected immed
 
 ### 5. View MLflow experiments
 
-Visit http://localhost:5000 to see tracked experiments, metrics, and artifacts.
+Visit <http://localhost:5000> to see tracked experiments, metrics, and artifacts.
 
 ---
 

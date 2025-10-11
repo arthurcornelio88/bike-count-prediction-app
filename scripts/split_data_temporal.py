@@ -14,7 +14,7 @@ Usage:
 
 import pandas as pd
 from datetime import datetime
-import pytz
+import pytz  # type: ignore[import-untyped]
 
 # Configuration
 INPUT_FILE = "data/comptage-velo-donnees-compteurs.csv"
@@ -22,7 +22,7 @@ OUTPUT_REF = "data/reference_data.csv"
 OUTPUT_CURRENT = "data/current_data.csv"
 
 # Cutoff date with timezone (70% split point)
-PARIS_TZ = pytz.timezone('Europe/Paris')
+PARIS_TZ = pytz.timezone("Europe/Paris")
 CUTOFF_DATE = PARIS_TZ.localize(datetime(2025, 1, 14))
 
 
@@ -33,29 +33,32 @@ def split_temporal_data():
     df = pd.read_csv(INPUT_FILE, sep=";")
 
     # Parse datetime column
-    df['date'] = pd.to_datetime(
-        df['Date et heure de comptage'],
-        utc=True
-    ).dt.tz_convert('Europe/Paris')
+    df["date"] = pd.to_datetime(
+        df["Date et heure de comptage"], utc=True
+    ).dt.tz_convert("Europe/Paris")
 
     # Temporal split
-    df_reference = df[df['date'] < CUTOFF_DATE].copy()
-    df_current = df[df['date'] >= CUTOFF_DATE].copy()
+    df_reference = df[df["date"] < CUTOFF_DATE].copy()
+    df_current = df[df["date"] >= CUTOFF_DATE].copy()
 
     # Display statistics
     ref_pct = len(df_reference) / len(df) * 100
     curr_pct = len(df_current) / len(df) * 100
 
-    print(f"\nSplit statistics:")
-    print(f"  - Reference (< {CUTOFF_DATE.date()}): {len(df_reference):,} rows ({ref_pct:.1f}%)")
-    print(f"  - Current (>= {CUTOFF_DATE.date()}):  {len(df_current):,} rows ({curr_pct:.1f}%)")
+    print("\nSplit statistics:")
+    print(
+        f"  - Reference (< {CUTOFF_DATE.date()}): {len(df_reference):,} rows ({ref_pct:.1f}%)"
+    )
+    print(
+        f"  - Current (>= {CUTOFF_DATE.date()}):  {len(df_current):,} rows ({curr_pct:.1f}%)"
+    )
     print(f"  - Total:                     {len(df):,} rows")
 
     # Save without temporary 'date' column, force semicolon separator
-    df_reference.drop(columns=['date']).to_csv(OUTPUT_REF, sep=";", index=False)
-    df_current.drop(columns=['date']).to_csv(OUTPUT_CURRENT, sep=";", index=False)
+    df_reference.drop(columns=["date"]).to_csv(OUTPUT_REF, sep=";", index=False)
+    df_current.drop(columns=["date"]).to_csv(OUTPUT_CURRENT, sep=";", index=False)
 
-    print(f"\nFiles created:")
+    print("\nFiles created:")
     print(f"  - {OUTPUT_REF}")
     print(f"  - {OUTPUT_CURRENT}")
 
@@ -65,9 +68,9 @@ def split_temporal_data():
 if __name__ == "__main__":
     split_temporal_data()
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("Next steps (DVC workflow):")
-    print("="*60)
+    print("=" * 60)
 
     print("\n1. Track datasets with DVC:")
     print("   dvc add data/reference_data.csv")
@@ -84,6 +87,6 @@ if __name__ == "__main__":
     print("   git add data/*.dvc .dvc/config .gitignore")
     print("   git commit -m 'feat: add DVC temporal data split'")
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("📚 Full documentation: docs/dvc.md")
-    print("="*60)
+    print("=" * 60)

@@ -6,11 +6,10 @@ Provides utilities for BigQuery, GCS, and data processing
 import os
 import time
 from datetime import datetime, timedelta
-from typing import Optional
 
 import gcsfs
 import pandas as pd
-from google.cloud import bigquery, storage
+from google.cloud import bigquery
 
 
 def get_storage_path(subdir: str, filename: str) -> str:
@@ -36,19 +35,29 @@ def get_storage_path(subdir: str, filename: str) -> str:
     if env == "PROD":
         # Use GCS path (bucket structure: raw_data/, models/, mlruns/, dvc-storage/)
         if subdir:
-            return f"gs://{gcs_bucket}/{subdir}/{filename}" if filename else f"gs://{gcs_bucket}/{subdir}/"
+            return (
+                f"gs://{gcs_bucket}/{subdir}/{filename}"
+                if filename
+                else f"gs://{gcs_bucket}/{subdir}/"
+            )
         else:
-            return f"gs://{gcs_bucket}/{filename}" if filename else f"gs://{gcs_bucket}/"
+            return (
+                f"gs://{gcs_bucket}/{filename}" if filename else f"gs://{gcs_bucket}/"
+            )
     else:
         # Use local path (project structure: data/, models/, mlruns/, etc.)
         # Special mapping: raw_data → data/ localement
         local_subdir = "data" if subdir == "raw_data" else subdir
 
-        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
+        base_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
         if local_subdir:
-            full_path = os.path.join(base_dir, local_subdir, filename) if filename else os.path.join(base_dir, local_subdir) + '/'
+            full_path = (
+                os.path.join(base_dir, local_subdir, filename)
+                if filename
+                else os.path.join(base_dir, local_subdir) + "/"
+            )
         else:
-            full_path = os.path.join(base_dir, filename) if filename else base_dir + '/'
+            full_path = os.path.join(base_dir, filename) if filename else base_dir + "/"
 
         return full_path
 
@@ -65,7 +74,9 @@ def get_reference_data_path() -> str:
         return f"gs://{bucket}/raw_data/reference_data.csv"
     else:
         # Local: data/reference_data.csv
-        return os.path.abspath(os.path.join(os.path.dirname(__file__), '../../data/reference_data.csv'))
+        return os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "../../data/reference_data.csv")
+        )
 
 
 def get_current_data_path() -> str:
@@ -80,7 +91,9 @@ def get_current_data_path() -> str:
         return f"gs://{bucket}/raw_data/current_data.csv"
     else:
         # Local: data/current_data.csv
-        return os.path.abspath(os.path.join(os.path.dirname(__file__), '../../data/current_data.csv'))
+        return os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "../../data/current_data.csv")
+        )
 
 
 def read_gcs_csv(path: str) -> pd.DataFrame:
@@ -119,7 +132,7 @@ def write_csv(df: pd.DataFrame, path: str):
     if path.startswith("gs://"):
         print(f"📝 Saving to GCS: {path}")
         fs = gcsfs.GCSFileSystem(skip_instance_cache=True, cache_timeout=0)
-        with fs.open(path, 'w') as f:
+        with fs.open(path, "w") as f:
             df.to_csv(f, index=False)
             f.flush()
         fs.invalidate_cache(path)
@@ -169,7 +182,9 @@ def wait_for_gcs(path: str, timeout: int = 30):
     raise FileNotFoundError(f"⛔ File not found in GCS after {timeout}s: {path}")
 
 
-def create_bq_dataset_if_not_exists(project_id: str, dataset_id: str, location: str = "europe-west1"):
+def create_bq_dataset_if_not_exists(
+    project_id: str, dataset_id: str, location: str = "europe-west1"
+):
     """
     Crée un dataset BigQuery s'il n'existe pas déjà
 
@@ -196,7 +211,7 @@ def create_monitoring_table_if_needed(
     project_id: str,
     dataset_id: str = "monitoring_audit",
     table_id: str = "logs",
-    location: str = "europe-west1"
+    location: str = "europe-west1",
 ):
     """
     Crée la table de monitoring si elle n'existe pas
@@ -250,7 +265,7 @@ def fetch_historical_data_from_bq(
     dataset: str,
     days_back: int = 7,
     limit_per_day: int = 100,
-    verbose: bool = True
+    verbose: bool = True,
 ) -> pd.DataFrame:
     """
     Fetches historical data from the past N days from BigQuery.
@@ -273,7 +288,7 @@ def fetch_historical_data_from_bq(
         table_id = f"{bq_project}.{dataset}.daily_{day}"
 
         try:
-            query = f"SELECT * FROM `{table_id}` LIMIT {limit_per_day}"
+            query = f"SELECT * FROM `{table_id}` LIMIT {limit_per_day}"  # nosec B608
             df = bq_client.query(query).to_dataframe()
 
             if not df.empty:
@@ -305,7 +320,7 @@ def host_to_docker_path(path: str) -> str:
         Chemin Docker équivalent
     """
     # Replace host base path with Docker /app path
-    base_host_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../'))
+    base_host_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../"))
     if path.startswith(base_host_path):
         relative_path = os.path.relpath(path, base_host_path)
         return f"/app/{relative_path}"

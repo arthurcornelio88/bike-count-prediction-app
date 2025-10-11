@@ -6,9 +6,7 @@ Simple tests covering:
 - get_best_model_from_summary() - selecting best model by metric
 """
 
-import pytest
 import json
-import tempfile
 import os
 from unittest.mock import patch, MagicMock
 from backend.regmodel.app.model_registry_summary import update_summary
@@ -29,7 +27,7 @@ class TestUpdateSummary:
             env="prod",
             test_mode=False,
             r2=0.85,
-            rmse=12.5
+            rmse=12.5,
         )
 
         # Check file exists
@@ -56,7 +54,7 @@ class TestUpdateSummary:
             model_type="rf",
             run_id="run_1",
             model_uri="gs://bucket/rf_1",
-            r2=0.80
+            r2=0.80,
         )
 
         # Second entry
@@ -65,7 +63,7 @@ class TestUpdateSummary:
             model_type="nn",
             run_id="run_2",
             model_uri="gs://bucket/nn_1",
-            r2=0.90
+            r2=0.90,
         )
 
         with open(summary_path, "r") as f:
@@ -87,7 +85,7 @@ class TestUpdateSummary:
             accuracy=0.92,
             precision=0.90,
             recall=0.88,
-            f1_score=0.89
+            f1_score=0.89,
         )
 
         with open(summary_path, "r") as f:
@@ -113,7 +111,7 @@ class TestUpdateSummary:
             model_type="rf",
             run_id="new_run",
             model_uri="gs://bucket/rf",
-            r2=0.85
+            r2=0.85,
         )
 
         with open(summary_path, "r") as f:
@@ -133,67 +131,123 @@ class TestGetBestModel:
 
         # Create summary with multiple models
         summary = [
-            {"model_type": "rf", "env": "prod", "test_mode": False, "r2": 0.80, "run_id": "run_1", "model_uri": "gs://bucket/rf_1"},
-            {"model_type": "rf", "env": "prod", "test_mode": False, "r2": 0.90, "run_id": "run_2", "model_uri": "gs://bucket/rf_2"},
-            {"model_type": "rf", "env": "prod", "test_mode": False, "r2": 0.85, "run_id": "run_3", "model_uri": "gs://bucket/rf_3"},
+            {
+                "model_type": "rf",
+                "env": "prod",
+                "test_mode": False,
+                "r2": 0.80,
+                "run_id": "run_1",
+                "model_uri": "gs://bucket/rf_1",
+            },
+            {
+                "model_type": "rf",
+                "env": "prod",
+                "test_mode": False,
+                "r2": 0.90,
+                "run_id": "run_2",
+                "model_uri": "gs://bucket/rf_2",
+            },
+            {
+                "model_type": "rf",
+                "env": "prod",
+                "test_mode": False,
+                "r2": 0.85,
+                "run_id": "run_3",
+                "model_uri": "gs://bucket/rf_3",
+            },
         ]
 
         with open(summary_path, "w") as f:
             json.dump(summary, f)
 
         # Mock GCS and model loading
-        with patch("backend.regmodel.app.model_registry_summary._download_gcs_dir") as mock_download:
-            with patch("backend.regmodel.app.model_registry_summary.RFPipeline.load") as mock_load:
+        with patch(
+            "backend.regmodel.app.model_registry_summary._download_gcs_dir"
+        ) as mock_download:
+            with patch(
+                "backend.regmodel.app.model_registry_summary.RFPipeline.load"
+            ) as mock_load:
                 test_dir = str(tmp_path / "model")
                 os.makedirs(test_dir, exist_ok=True)
                 mock_download.return_value = test_dir
                 mock_load.return_value = MagicMock()
 
-                from backend.regmodel.app.model_registry_summary import get_best_model_from_summary
+                from backend.regmodel.app.model_registry_summary import (
+                    get_best_model_from_summary,
+                )
 
                 model = get_best_model_from_summary(
                     model_type="rf",
                     summary_path=summary_path,
                     env="prod",
                     metric="r2",
-                    test_mode=False
+                    test_mode=False,
                 )
 
                 # Should have selected run_2 (r2=0.90)
                 mock_download.assert_called_once()
                 call_args = mock_download.call_args[0]
                 assert "rf_2" in call_args[0]
+                assert model is not None  # Verify model was returned
 
     def test_get_best_model_by_rmse(self, tmp_path):
         """Test selecting best model by rmse (lowest)."""
         summary_path = str(tmp_path / "summary.json")
 
         summary = [
-            {"model_type": "rf", "env": "prod", "test_mode": False, "rmse": 15.0, "run_id": "run_1", "model_uri": "gs://bucket/rf_1"},
-            {"model_type": "rf", "env": "prod", "test_mode": False, "rmse": 10.0, "run_id": "run_2", "model_uri": "gs://bucket/rf_2"},
-            {"model_type": "rf", "env": "prod", "test_mode": False, "rmse": 12.0, "run_id": "run_3", "model_uri": "gs://bucket/rf_3"},
+            {
+                "model_type": "rf",
+                "env": "prod",
+                "test_mode": False,
+                "rmse": 15.0,
+                "run_id": "run_1",
+                "model_uri": "gs://bucket/rf_1",
+            },
+            {
+                "model_type": "rf",
+                "env": "prod",
+                "test_mode": False,
+                "rmse": 10.0,
+                "run_id": "run_2",
+                "model_uri": "gs://bucket/rf_2",
+            },
+            {
+                "model_type": "rf",
+                "env": "prod",
+                "test_mode": False,
+                "rmse": 12.0,
+                "run_id": "run_3",
+                "model_uri": "gs://bucket/rf_3",
+            },
         ]
 
         with open(summary_path, "w") as f:
             json.dump(summary, f)
 
-        with patch("backend.regmodel.app.model_registry_summary._download_gcs_dir") as mock_download:
-            with patch("backend.regmodel.app.model_registry_summary.RFPipeline.load") as mock_load:
+        with patch(
+            "backend.regmodel.app.model_registry_summary._download_gcs_dir"
+        ) as mock_download:
+            with patch(
+                "backend.regmodel.app.model_registry_summary.RFPipeline.load"
+            ) as mock_load:
                 test_dir = str(tmp_path / "model_rmse")
                 os.makedirs(test_dir, exist_ok=True)
                 mock_download.return_value = test_dir
                 mock_load.return_value = MagicMock()
 
-                from backend.regmodel.app.model_registry_summary import get_best_model_from_summary
+                from backend.regmodel.app.model_registry_summary import (
+                    get_best_model_from_summary,
+                )
 
                 model = get_best_model_from_summary(
                     model_type="rf",
                     summary_path=summary_path,
                     env="prod",
                     metric="rmse",
-                    test_mode=False
+                    test_mode=False,
                 )
 
                 # Should select run_2 (rmse=10.0, lowest)
                 call_args = mock_download.call_args[0]
                 assert "rf_2" in call_args[0]
+                assert model is not None  # Verify model was returned

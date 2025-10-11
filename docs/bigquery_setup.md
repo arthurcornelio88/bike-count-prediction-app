@@ -18,7 +18,7 @@
 
 **3 Datasets pour traçabilité complète** :
 
-```
+```text
 datascientest-460618
 ├── bike_traffic_raw           # Données brutes quotidiennes
 │   └── daily_YYYYMMDD        # Tables par jour
@@ -41,21 +41,24 @@ datascientest-460618
 3. Créer les 3 datasets :
 
 #### Dataset 1 : `bike_traffic_raw`
-```
+
+```text
 Dataset ID: bike_traffic_raw
 Location: europe-west1 (Belgium)
 Default table expiration: Never
 ```
 
 #### Dataset 2 : `bike_traffic_predictions`
-```
+
+```text
 Dataset ID: bike_traffic_predictions
 Location: europe-west1 (Belgium)
 Default table expiration: Never
 ```
 
 #### Dataset 3 : `monitoring_audit`
-```
+
+```text
 Dataset ID: monitoring_audit
 Location: europe-west1 (Belgium)
 Default table expiration: Never

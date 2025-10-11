@@ -31,5 +31,11 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    "bandit>=1.8.0",
     "httpx>=0.28.1",
+    "mypy>=1.13.0",
+    "pandas-stubs>=2.2.0",
+    "pre-commit>=4.0.0",
+    "ruff>=0.14.0",
+    "types-pytz>=2025.2.0.20250809",
 ]

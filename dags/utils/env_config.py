@@ -2,6 +2,7 @@
 Configuration centralisée des variables d'environnement
 Gère DEV/PROD avec Google Secret Manager
 """
+
 import os
 from typing import Dict, Optional
 from google.cloud import secretmanager
@@ -69,7 +70,9 @@ class EnvironmentConfig:
             if secret_value:
                 clean_value = secret_value.strip()
                 os.environ[env_var] = clean_value
-                print(f"✅ Loaded secret {secret_id} → {env_var} = {clean_value[:20]}...")
+                print(
+                    f"✅ Loaded secret {secret_id} → {env_var} = {clean_value[:20]}..."
+                )
             else:
                 print(f"⚠️ Failed to load secret {secret_id}")
 
@@ -93,7 +96,9 @@ class EnvironmentConfig:
         # Configuration BigQuery développement
         os.environ["BQ_PROJECT"] = os.getenv("BQ_PROJECT", "datascientest-460618")
         os.environ["BQ_RAW_DATASET"] = os.getenv("BQ_RAW_DATASET", "bike_traffic_raw")
-        os.environ["BQ_PREDICT_DATASET"] = os.getenv("BQ_PREDICT_DATASET", "bike_traffic_predictions")
+        os.environ["BQ_PREDICT_DATASET"] = os.getenv(
+            "BQ_PREDICT_DATASET", "bike_traffic_predictions"
+        )
         os.environ["BQ_LOCATION"] = os.getenv("BQ_LOCATION", "europe-west1")
 
         # API URL développement
@@ -102,6 +107,7 @@ class EnvironmentConfig:
 
         # Créer les répertoires nécessaires
         import pathlib
+
         pathlib.Path("/app/shared_data").mkdir(parents=True, exist_ok=True)
         pathlib.Path("/app/models").mkdir(parents=True, exist_ok=True)
 

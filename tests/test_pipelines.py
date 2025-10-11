@@ -10,11 +10,11 @@ from app.classes import RFPipeline, NNPipeline
 def sample_data():
     """Create sample bike traffic data for testing."""
     data = {
-        'nom_du_compteur': ['Totem 73 boulevard de Sébastopol S-N'] * 100,
-        'Date et heure de comptage': pd.date_range(
-            '2024-04-01', periods=100, freq='h', tz='Europe/Paris'
+        "nom_du_compteur": ["Totem 73 boulevard de Sébastopol S-N"] * 100,
+        "Date et heure de comptage": pd.date_range(
+            "2024-04-01", periods=100, freq="h", tz="Europe/Paris"
         ).astype(str),
-        'Coordonnées géographiques': ['48.8672, 2.3501'] * 100,
+        "Coordonnées géographiques": ["48.8672, 2.3501"] * 100,
     }
     df = pd.DataFrame(data)
     return df
@@ -34,8 +34,8 @@ class TestRFPipeline:
         """Test RF pipeline can be instantiated."""
         rf = RFPipeline()
         assert rf is not None
-        assert hasattr(rf, 'model')
-        assert hasattr(rf, 'cleaner')
+        assert hasattr(rf, "model")
+        assert hasattr(rf, "cleaner")
 
     def test_rf_pipeline_fit(self, sample_X_y):
         """Test RF pipeline can fit on sample data."""
@@ -46,7 +46,7 @@ class TestRFPipeline:
         rf.fit(X, y)
 
         # Model should be fitted
-        assert hasattr(rf.model, 'n_estimators')
+        assert hasattr(rf.model, "n_estimators")
         assert rf.model.n_estimators == 50
 
     def test_rf_pipeline_predict(self, sample_X_y):
@@ -100,9 +100,7 @@ class TestRFPipeline:
         pred_original = rf.predict(X.head(5))
         pred_loaded = rf_loaded.predict(X.head(5))
 
-        np.testing.assert_array_almost_equal(
-            pred_original, pred_loaded, decimal=2
-        )
+        np.testing.assert_array_almost_equal(pred_original, pred_loaded, decimal=2)
 
 
 class TestNNPipeline:
@@ -112,13 +110,13 @@ class TestNNPipeline:
         """Test NN pipeline can be instantiated."""
         nn = NNPipeline()
         assert nn is not None
-        assert hasattr(nn, 'embedding_dim')
+        assert hasattr(nn, "embedding_dim")
         assert nn.embedding_dim == 8
 
     def test_nn_pipeline_fit(self, sample_X_y):
         """Test NN pipeline can fit on sample data."""
         X, y = sample_X_y
-        y = y.astype('float32')
+        y = y.astype("float32")
 
         nn = NNPipeline()
 
@@ -132,7 +130,7 @@ class TestNNPipeline:
     def test_nn_pipeline_predict(self, sample_X_y):
         """Test NN pipeline can predict."""
         X, y = sample_X_y
-        y = y.astype('float32')
+        y = y.astype("float32")
 
         nn = NNPipeline()
         nn.fit(X, y, epochs=2, batch_size=32)
@@ -148,7 +146,7 @@ class TestNNPipeline:
     def test_nn_pipeline_embedding_dim(self, sample_X_y):
         """Test NN pipeline with custom embedding dimension."""
         X, y = sample_X_y
-        y = y.astype('float32')
+        y = y.astype("float32")
 
         nn = NNPipeline(embedding_dim=16)
         assert nn.embedding_dim == 16
@@ -159,7 +157,7 @@ class TestNNPipeline:
     def test_nn_pipeline_save_load(self, sample_X_y, tmp_path):
         """Test NN pipeline can be saved and loaded."""
         X, y = sample_X_y
-        y = y.astype('float32')
+        y = y.astype("float32")
 
         nn = NNPipeline()
         nn.fit(X, y, epochs=2, batch_size=32)
@@ -182,14 +180,12 @@ class TestNNPipeline:
         pred_loaded = nn_loaded.predict(X.head(5)).flatten()
 
         # Allow some tolerance for NN predictions
-        np.testing.assert_allclose(
-            pred_original, pred_loaded, rtol=0.1
-        )
+        np.testing.assert_allclose(pred_original, pred_loaded, rtol=0.1)
 
     def test_nn_pipeline_model_architecture(self, sample_X_y):
         """Test NN model has expected architecture."""
         X, y = sample_X_y
-        y = y.astype('float32')
+        y = y.astype("float32")
 
         nn = NNPipeline(embedding_dim=8)
         nn.fit(X, y, epochs=1, batch_size=32)
@@ -207,13 +203,15 @@ class TestPipelineEdgeCases:
 
     def test_rf_pipeline_with_minimal_data(self):
         """Test RF pipeline with minimal dataset."""
-        X = pd.DataFrame({
-            'nom_du_compteur': ['Compteur A'] * 10,
-            'Date et heure de comptage': pd.date_range(
-                '2024-04-01', periods=10, freq='h', tz='Europe/Paris'
-            ).astype(str),
-            'Coordonnées géographiques': ['48.8672, 2.3501'] * 10,
-        })
+        X = pd.DataFrame(
+            {
+                "nom_du_compteur": ["Compteur A"] * 10,
+                "Date et heure de comptage": pd.date_range(
+                    "2024-04-01", periods=10, freq="h", tz="Europe/Paris"
+                ).astype(str),
+                "Coordonnées géographiques": ["48.8672, 2.3501"] * 10,
+            }
+        )
         y = np.random.randint(50, 300, size=10)
 
         rf = RFPipeline()
@@ -225,7 +223,7 @@ class TestPipelineEdgeCases:
     def test_nn_pipeline_with_different_batch_sizes(self, sample_X_y):
         """Test NN pipeline with various batch sizes."""
         X, y = sample_X_y
-        y = y.astype('float32')
+        y = y.astype("float32")
 
         for batch_size in [16, 32, 64]:
             nn = NNPipeline()
