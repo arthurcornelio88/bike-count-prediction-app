@@ -150,6 +150,8 @@ curl -X POST "http://localhost:8000/train" \
 
 ### **Phase 3 : Orchestration Airflow + Monitoring Production** (`feat/mlops-airflow-pipeline`)
 
+**Status**: 🔄 In Progress
+
 **Objectifs unifiés** :
 
 - 🔄 Pipeline automatisé end-to-end avec Airflow
@@ -159,9 +161,51 @@ curl -X POST "http://localhost:8000/train" \
 - 📈 Métriques API avec Prometheus + Grafana
 - 🔒 Sécurité API (API Key + Rate Limiting)
 
+**Data Strategy** (Updated 2025-10-11) ✅:
+
+After data quality validation, we identified that all data sources (reference_data.csv,
+current_data.csv, current_api_data.csv) are from the same origin (Paris Open Data historical
+exports) with perfect correlation (r=1.0, MAE=0).
+
+**Final Decision**: Use `current_api_data.csv` (905k records, 2024-09-01 → 2025-10-10) as unified baseline:
+
+- 80% Train: ~724k records (2024-09 → 2025-08)
+- 20% Test: ~181k records (2025-08 → 2025-10)
+- Live API ingestion starting 2025-10-11 (cutoff date)
+- Weekly drift detection + conditional fine-tuning
+
+📚 **Full documentation**: [docs/fetch_data_strategy.md](docs/fetch_data_strategy.md)
+
 ---
 
-#### **3.1 Architecture BigQuery**
+#### **3.1 Data Preparation & Baseline** ✅
+
+**Baseline Creation**:
+
+```bash
+# Split current_api_data.csv into train/test
+python scripts/split_data_temporal.py \
+    --input data/current_api_data.csv \
+    --train-ratio 0.8 \
+    --cutoff-date 2025-08-15
+
+# Output:
+# - data/train_baseline.csv (~724k records, 2024-09-01 → 2025-08-15)
+# - data/test_baseline.csv (~181k records, 2025-08-16 → 2025-10-10)
+```
+
+**DVC Tracking**:
+
+```bash
+dvc add data/train_baseline.csv data/test_baseline.csv
+dvc push
+git add data/*.dvc .dvc/config
+git commit -m "chore: add new baseline from current_api_data"
+```
+
+---
+
+#### **3.2 Architecture BigQuery**
 
 **3 Datasets pour traçabilité complète** :
 
