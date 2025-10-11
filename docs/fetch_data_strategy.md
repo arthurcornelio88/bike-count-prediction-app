@@ -8,15 +8,18 @@
 
 ## 🎯 Executive Summary
 
-After thorough data quality validation, we identified that all our data sources (reference_data.csv, current_data.csv, and current_api_data.csv) originate from **Paris Open Data historical exports**, ensuring perfect consistency.
+After thorough data quality validation, we identified that all our data sources
+(reference_data.csv, current_data.csv, and current_api_data.csv) originate from
+**Paris Open Data historical exports**, ensuring perfect consistency.
 
-**Final Decision**: Use `current_api_data.csv` (905k records, 2024-09-01 → 2025-10-10) as the unified baseline, complemented by daily live API ingestion starting 2025-10-11.
+**Final Decision**: Use `current_api_data.csv` (905k records, 2024-09-01 → 2025-10-10)
+as the unified baseline, complemented by daily live API ingestion starting 2025-10-11.
 
 ---
 
 ## ✅ Recommended Architecture
 
-```
+```text
 PRODUCTION MLOps PIPELINE:
 ═══════════════════════════════════════════════════════════════════
 
@@ -250,7 +253,9 @@ We compared historical CSV (reference + current) vs current_api_data.csv:
 
 ### Conclusion
 
-All data sources are from **Paris Open Data historical exports**, downloaded at different times but from the same origin. This ensures:
+All data sources are from **Paris Open Data historical exports**, downloaded at different
+times but from the same origin. This ensures:
+
 - ✅ Perfect data consistency
 - ✅ No data quality issues
 - ✅ Trustworthy for training and evaluation
@@ -291,7 +296,8 @@ graph TB
 
 ### Initial Audit Results
 
-We initially explored using reference_data.csv + current_data.csv (948k records, 2024-04 → 2025-05) with live API ingestion starting 2025-05-18.
+We initially explored using reference_data.csv + current_data.csv (948k records,
+2024-04 → 2025-05) with live API ingestion starting 2025-05-18.
 
 #### Discovered Issues
 
@@ -318,7 +324,7 @@ Use current_api_data.csv instead, which extends to 2025-10-10, eliminating the g
 
 ### BigQuery Structure
 
-```
+```text
 PROJECT: datascientest-460618
 └── DATASET: bike_traffic_raw
     ├── historical_baseline          ← One-time load (train_baseline.csv)
@@ -353,17 +359,20 @@ PROJECT: datascientest-460618
 ## 🔗 References
 
 ### Scripts
+
 - [scripts/audit_temporal_continuity.py](../scripts/audit_temporal_continuity.py) - Initial continuity audit
 - [scripts/validate_overlap_data_quality.py](../scripts/validate_overlap_data_quality.py) - Data quality validation
 - [scripts/test_dag_fetch.py](../scripts/test_dag_fetch.py) - DAG parameter testing
 
 ### Documentation
+
 - [docs/temporal_continuity_audit.json](temporal_continuity_audit.json) - Initial audit results
 - [docs/overlap_data_quality_validation.json](overlap_data_quality_validation.json) - Quality validation
 - [docs/bigquery_setup.md](bigquery_setup.md) - BigQuery configuration guide
 - [docs/dvc.md](dvc.md) - DVC data versioning
 
 ### DAGs
+
 - [dags/dag_daily_fetch_data.py](../dags/dag_daily_fetch_data.py) - Daily API ingestion
 - [dags/dag_daily_prediction.py](../dags/dag_daily_prediction.py) - Daily predictions
 - [dags/dag_monitor_and_train.py](../dags/dag_monitor_and_train.py) - Weekly monitoring + fine-tuning
