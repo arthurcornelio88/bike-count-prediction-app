@@ -94,24 +94,25 @@ create_monitoring_table_if_needed("datascientest-460618")
 
 ---
 
-## Upload Reference Data to GCS
+## Upload Baseline Data to GCS
 
-The DAGs need access to reference data (historical bike traffic) for drift detection and model training.
+The DAGs need access to baseline data (train_baseline.csv) for champion model training and test_baseline.csv for drift detection.
 
-### Upload reference_data.csv to GCS
+### Upload train_baseline.csv to GCS
 
 ```bash
-# Upload reference data (934MB) to the correct path
-gsutil -m cp data/reference_data.csv gs://df_traffic_cyclist1/raw_data/reference_data.csv
+# Upload train baseline (~724k records) to GCS
+gsutil -m cp data/train_baseline.csv gs://<your-bucket>/data/train_baseline.csv
 
 # Verify upload
-gsutil ls -lh gs://df_traffic_cyclist1/raw_data/
+gsutil ls -lh gs://<your-bucket>/data/
 
 # Expected output:
-# 934M  gs://df_traffic_cyclist1/raw_data/reference_data.csv
+# ~200MB  gs://<your-bucket>/data/train_baseline.csv
 ```
 
-**Note:** This is a one-time upload. The DAG will fetch this file from GCS for drift detection in PROD mode.
+**Note:** This is a one-time upload. The champion model will be trained on this baseline.
+Daily API fetch will populate BigQuery for production predictions and weekly drift detection.
 
 ---
 
@@ -339,7 +340,8 @@ CREATE TABLE `datascientest-460618.monitoring_audit.logs` (
 ## Checklist finale
 
 - [ ] 3 datasets BigQuery créés (`bike_traffic_raw`, `bike_traffic_predictions`, `monitoring_audit`)
-- [ ] Reference data uploaded to GCS (`gs://df_traffic_cyclist1/data/reference_data.csv`)
+- [ ] Train baseline uploaded to GCS (`gs://<your-bucket>/raw_data/train_baseline.csv`)
+- [ ] Test baseline uploaded to GCS (`gs://<your-bucket>/raw_data/test_baseline.csv`)
 - [ ] 7 secrets créés dans Secret Manager
 - [ ] Service Account a accès aux secrets (rôle `secretmanager.secretAccessor`)
 - [ ] Fichier `.env.airflow` créé avec variables DEV

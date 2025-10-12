@@ -183,18 +183,25 @@ exports) with perfect correlation (r=1.0, MAE=0).
 **Baseline Creation**:
 
 ```bash
-# Split current_api_data.csv into train/test
-python scripts/split_data_temporal.py \
-    --input data/current_api_data.csv \
-    --train-ratio 0.8 \
-    --cutoff-date 2025-08-15
+# Split current_api_data.csv into train/test (80/20 split)
+python scripts/split_data_temporal.py
 
 # Output:
 # - data/train_baseline.csv (~724k records, 2024-09-01 → 2025-08-15)
 # - data/test_baseline.csv (~181k records, 2025-08-16 → 2025-10-10)
 ```
 
-**DVC Tracking**:
+**GCS Upload** (baseline for champion model training):
+
+```bash
+# Upload train_baseline.csv to GCS
+gsutil -m cp data/train_baseline.csv gs://<your-bucket>/data/train_baseline.csv
+
+# Verify upload
+gsutil ls -lh gs://<your-bucket>/data/
+```
+
+**DVC Tracking** (optional - for local versioning):
 
 ```bash
 dvc add data/train_baseline.csv data/test_baseline.csv
@@ -202,6 +209,63 @@ dvc push
 git add data/*.dvc .dvc/config
 git commit -m "chore: add new baseline from current_api_data"
 ```
+
+---
+
+#### **3.1.5 Training Strategy** (Hybrid Architecture)
+
+**Architecture**: Local champion training + Production fine-tuning
+
+| Component | Where | When | Data Size | Duration |
+|-----------|-------|------|-----------|----------|
+| **Champion Training** | 💻 Local | One-time (+ quarterly) | 724k records | 15-30 min |
+| **Fine-Tuning** | ☁️ Production | Weekly (if drift) | 2k records | 5-10 min |
+| **Evaluation** | ☁️ Production | Weekly | 181k test set | 2-3 min |
+| **Inference** | ☁️ Production | Daily | 100 records | <1 sec |
+
+**Workflow**:
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│ INITIAL SETUP (Local - One Time)                       │
+├─────────────────────────────────────────────────────────┤
+│ 1. Train champion_v1 on train_baseline.csv (local)     │
+│ 2. Evaluate on test_baseline.csv → MAE: ~12            │
+│ 3. Upload to GCS + MLflow registry                     │
+│ 4. Deploy to Cloud Run API                             │
+└─────────────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────────────┐
+│ PRODUCTION (Weekly DAG)                                 │
+├─────────────────────────────────────────────────────────┤
+│ 1. Fetch last 7 days from BigQuery                     │
+│ 2. Drift detection (Evidently vs test_baseline)        │
+│ 3. If NO drift → skip, keep champion                   │
+│ 4. If drift → fine-tune on last 30 days                │
+│ 5. Evaluate challenger on SAME test_baseline.csv       │
+│ 6. Champion/Challenger decision (5% threshold)         │
+│ 7. Log metrics to monitoring_audit.logs                │
+└─────────────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────────────┐
+│ QUARTERLY RETRAIN (Local - Every 3 months)             │
+├─────────────────────────────────────────────────────────┤
+│ 1. Download all BigQuery data (3 months)               │
+│ 2. Merge with train_baseline.csv → new_train.csv       │
+│ 3. Retrain champion_v2 locally (full training)         │
+│ 4. Evaluate on SAME test_baseline.csv                  │
+│ 5. If improved → deploy as new champion                │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Key Decisions**:
+
+- **Local training**: Full champion model on complete baseline (724k records)
+- **Production fine-tuning**: Lightweight adaptation on recent data (30 days, ~2k records)
+- **Fixed test set**: Always evaluate on same test_baseline.csv for valid comparison
+- **Champion/Challenger**: Promote only if 5% MAE improvement on test set
+
+📚 **Full strategy**: [docs/training_strategy.md](docs/training_strategy.md)
 
 ---
 

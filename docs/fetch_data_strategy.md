@@ -70,28 +70,25 @@ PRODUCTION MLOps PIPELINE:
 ### Phase 1: Data Preparation ✅
 
 ```bash
-# 1. Create train/test split from current_api_data.csv
-python scripts/prepare_baseline.py \
-    --input data/current_api_data.csv \
-    --train-ratio 0.8 \
-    --output-train data/train_baseline.csv \
-    --output-test data/test_baseline.csv
+# 1. Create train/test split from current_api_data.csv (80/20)
+python scripts/split_data_temporal.py
 
 # Expected output:
 # - train_baseline.csv: ~724k records (2024-09-01 → 2025-08-15)
 # - test_baseline.csv: ~181k records (2025-08-16 → 2025-10-10)
 ```
 
-### Phase 2: Version Control
+![Split DS](img/split_ds.png)
+
+### Phase 2: Version Control & Upload
 
 ```bash
-# Upload to GCS
-gsutil cp data/train_baseline.csv gs://df_traffic_cyclist1/baselines/
-gsutil cp data/test_baseline.csv gs://df_traffic_cyclist1/baselines/
+# Upload to GCS raw_data/
+gsutil -m cp data/train_baseline.csv gs://<your-bucket>/raw_data/train_baseline.csv
+gsutil -m cp data/test_baseline.csv gs://<your-bucket>/raw_data/test_baseline.csv
 
 # Track with DVC
-dvc add data/train_baseline.csv
-dvc add data/test_baseline.csv
+dvc add data/train_baseline.csv data/test_baseline.csv
 dvc push
 
 # Commit DVC metadata
@@ -99,10 +96,10 @@ git add data/train_baseline.csv.dvc data/test_baseline.csv.dvc
 git commit -m "chore: add new baseline splits from current_api_data"
 ```
 
-### Phase 3: Train Legacy Model
+### Phase 3: Train Champion Model (Local)
 
 ```bash
-# Train champion model
+# Train champion model locally on train_baseline.csv
 python scripts/train_legacy_model.py \
     --train data/train_baseline.csv \
     --test data/test_baseline.csv \
@@ -112,124 +109,29 @@ python scripts/train_legacy_model.py \
 # - MAE: < 15
 # - RMSE: < 25
 # - R²: > 0.85
+
+# Upload champion to MLflow/GCS for production use
 ```
 
-### Phase 4: Upload to BigQuery
+**Note**: Champion model is trained locally once. Production will only perform fine-tuning on fresh data.
 
-```sql
--- Create historical baseline table
-CREATE TABLE `bike_traffic_raw.historical_baseline` AS
-SELECT * FROM EXTERNAL_TABLE(
-  'gs://df_traffic_cyclist1/baselines/train_baseline.csv',
-  FORMAT = 'CSV',
-  ...
-);
+### Phase 4: BigQuery Setup
 
--- Verify
-SELECT
-  COUNT(*) as total_records,
-  MIN(date_et_heure_de_comptage) as date_min,
-  MAX(date_et_heure_de_comptage) as date_max
-FROM `bike_traffic_raw.historical_baseline`;
--- Expected: ~724k records, 2024-09-01 → 2025-08-15
+```bash
+# Only daily API fetch will populate BigQuery (no historical baseline upload)
+# BigQuery tables: bike_traffic_raw.daily_YYYYMMDD
+
+# Schema auto-created by DAG fetch
+# Data accumulates daily starting 2025-10-11
 ```
 
 ### Phase 5: Configure DAG Fetch
 
-```python
-# dags/dag_daily_fetch_data.py
-
-CUTOFF_DATE = "2025-10-10"  # Last date in baseline
-
-params = {
-    "limit": 100,
-    "where": f"sum_counts > 0 AND date > '{CUTOFF_DATE}'",
-    "order_by": "date DESC",
-    "timezone": "Europe/Paris",
-}
-
-# Column mapping API → Historical format
-column_mapping = {
-    "sum_counts": "comptage_horaire",
-    "date": "date_et_heure_de_comptage",
-    "id_compteur": "identifiant_du_compteur",
-    "nom_compteur": "nom_du_compteur",
-    "coordinates": "coordonnees_geographiques",  # dict → "lat, lon" string
-}
-```
+> To implement
 
 ### Phase 6: Weekly Monitoring DAG
 
-```python
-# dags/dag_monitor_and_train.py
-
-def detect_drift(**context):
-    """Compare last 7 days vs test baseline"""
-
-    # Load test baseline (reference for drift)
-    test_baseline = load_from_gcs("gs://df_traffic_cyclist1/baselines/test_baseline.csv")
-
-    # Load last 7 days from BigQuery
-    query = """
-        SELECT * FROM `bike_traffic_raw.daily_*`
-        WHERE _TABLE_SUFFIX >= FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY))
-    """
-    current_week = bq_client.query(query).to_dataframe()
-
-    # Drift detection via Evidently
-    drift_report = detect_data_drift(reference=test_baseline, current=current_week)
-
-    return drift_report.drift_detected
-
-
-def fine_tune_if_drift(**context):
-    """Conditional fine-tuning"""
-
-    drift = context["ti"].xcom_pull(task_ids="detect_drift")
-
-    if not drift:
-        print("✅ No drift detected, keeping champion")
-        return
-
-    print("⚠️ Drift detected! Starting fine-tuning...")
-
-    # Load last 30 days for fine-tuning
-    query = """
-        SELECT * FROM `bike_traffic_raw.daily_*`
-        WHERE _TABLE_SUFFIX >= FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
-    """
-    fresh_data = bq_client.query(query).to_dataframe()
-
-    # Fine-tune via API
-    response = requests.post(f"{API_URL}/train", json={
-        "fine_tuning": True,
-        "data": fresh_data.to_dict(orient="records"),
-        "learning_rate": 0.01,
-        "epochs": 10,
-    }, timeout=600)
-
-    new_metrics = response.json()["metrics"]
-
-    # Load test baseline for evaluation
-    test_baseline = load_from_gcs("gs://df_traffic_cyclist1/baselines/test_baseline.csv")
-
-    # Evaluate new model on SAME test set
-    eval_response = requests.post(f"{API_URL}/evaluate", json={
-        "data": test_baseline.to_dict(orient="records"),
-    })
-
-    new_test_metrics = eval_response.json()["metrics"]
-    champion_metrics = load_champion_metrics()
-
-    # Champion/Challenger decision
-    improvement_threshold = 0.05  # 5% improvement required
-
-    if new_test_metrics["mae"] < champion_metrics["mae"] * (1 - improvement_threshold):
-        print(f"✅ Promoting new model! MAE: {new_test_metrics['mae']} vs {champion_metrics['mae']}")
-        promote_to_champion(new_metrics)
-    else:
-        print(f"⚠️ New model not better, keeping champion")
-```
+> To implement
 
 ---
 
@@ -410,7 +312,6 @@ PROJECT: datascientest-460618
 
 ---
 
-**Author**: Claude Code
 **Date**: 2025-10-11
 **Version**: 2.0
 **Status**: ✅ Strategy finalized based on data quality analysis
