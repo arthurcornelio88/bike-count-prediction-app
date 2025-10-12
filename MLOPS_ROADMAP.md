@@ -159,6 +159,48 @@ curl -X POST "http://localhost:8000/train" \
 - ✅ Metrics correctly returned in API response (RMSE, R²)
 - ✅ MLflow tracking confirmed (runs, metrics, tags, artifacts to GCS)
 
+#### **2.4 Quick smoke tests for `/train` (model-test)**
+
+Before deploying Airflow, run quick smoke tests against the `/train` endpoint using
+`test_mode=true` so training is fast and safe. Put these checks in CI or run locally.
+
+1) Quick curl smoke test (RF):
+
+```bash
+curl -s -X POST "http://localhost:8000/train" \
+  -H "Content-Type: application/json" \
+  -d '{"model_type":"rf","data_source":"baseline","test_mode":true,"env":"dev"}' \
+  | jq
+```
+
+- Expected: JSON response with `run_id`, `metrics` (rmse, r2) and `model_uri`.
+- Artifacts should be small (uses `test_sample.csv`) and `summary.json` should be appended.
+
+2) Python example (programmatic check & retry):
+
+```python
+import requests
+resp = requests.post(
+    "http://localhost:8000/train",
+    json={"model_type":"nn","data_source":"baseline","test_mode":True,"env":"dev"},
+    timeout=600,
+)
+resp.raise_for_status()
+payload = resp.json()
+assert "run_id" in payload
+assert "metrics" in payload and "rmse" in payload["metrics"]
+print("Smoke test OK:", payload["run_id"], payload["metrics"])
+```
+
+3) Quick checks after training:
+
+- Check MLflow UI (<http://localhost:5000>) for the new run.
+- Confirm small artifacts in GCS under `mlflow-artifacts` (test run folder).
+- Confirm `summary.json` appended in `gs://df_traffic_cyclist1/models/summary.json`.
+
+These quick tests let you validate the entire stack (API → MLflow → GCS → summary.json)
+in a few minutes before wiring the `/train` call into Airflow.
+
 ---
 
 ### **Phase 3 : Orchestration Airflow + Monitoring Production** (`feat/mlops-airflow-pipeline`)
