@@ -1,10 +1,30 @@
 import pandas as pd
 import argparse
 import subprocess
+import os
+
+# CRITICAL: Set GCS credentials BEFORE importing mlflow
+# MLflow client needs this to upload artifacts to GCS
+if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") is None:
+    # Priority 1: mlflow-trainer.json (has bucket write permissions)
+    gcp_credentials_path = "./mlflow-trainer.json"
+    if os.path.exists(gcp_credentials_path):
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_credentials_path
+        print(f"🔐 Using GCS credentials: {gcp_credentials_path}")
+    else:
+        # Fallback: gcp.json (may have limited permissions)
+        gcp_credentials_path = "./gcp.json"
+        if os.path.exists(gcp_credentials_path):
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_credentials_path
+            print(f"🔐 Using GCS credentials: {gcp_credentials_path}")
+        else:
+            print(
+                "⚠️  WARNING: No GCS credentials found (mlflow-trainer.json or gcp.json)"
+            )
+
 import mlflow
 import mlflow.sklearn
 import mlflow.tensorflow
-import os
 import shutil
 import numpy as np
 from app.classes import RFPipeline, NNPipeline, AffluenceClassifierPipeline
@@ -15,9 +35,21 @@ from datetime import datetime
 
 
 def setup_environment(env: str, model_test: bool):
+    """
+    Setup MLflow tracking and experiment.
+    Note: GCS credentials already set at module import.
+    """
     if env == "dev":
         mlflow.set_tracking_uri("http://127.0.0.1:5000")
-        mlflow.set_experiment("traffic_cycliste_experiment")
+        mlflow.set_experiment(
+            "bike-traffic-training"
+        )  # New experiment with GCS artifacts
+
+        # Verify experiment configuration
+        experiment = mlflow.get_experiment_by_name("bike-traffic-training")
+        print(f"📊 Experiment: {experiment.name} (ID: {experiment.experiment_id})")
+        print(f"📦 Artifact location: {experiment.artifact_location}")
+
         data_path = (
             "data/comptage-velo-donnees-compteurs_test.csv"
             if model_test
@@ -27,7 +59,9 @@ def setup_environment(env: str, model_test: bool):
         os.makedirs(artifact_path, exist_ok=True)
     elif env == "prod":
         mlflow.set_tracking_uri("http://127.0.0.1:5000")
-        mlflow.set_experiment("traffic_cycliste_experiment")
+        mlflow.set_experiment(
+            "bike-traffic-training"
+        )  # New experiment with GCS artifacts
         data_path = (
             "gs://df_traffic_cyclist1/raw_data/comptage-velo-donnees-compteurs_test.csv"
             if model_test
@@ -35,12 +69,6 @@ def setup_environment(env: str, model_test: bool):
         )
         artifact_path = "models/"
         os.makedirs(artifact_path, exist_ok=True)
-
-        if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") is None:
-            gcp_credentials_path = "./mlflow-trainer.json"
-            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_credentials_path
-            if not os.path.exists(gcp_credentials_path):
-                raise FileNotFoundError(f"Clé GCP manquante : {gcp_credentials_path}")
     else:
         raise ValueError("Environnement invalide")
 
@@ -62,47 +90,46 @@ def load_and_clean_data(path: str, preserve_target=False):
     return X, y
 
 
-def log_and_export_model(
-    model_type, model_obj, temp_model_path, rmse, r2, env, test_mode, run_id
+def update_model_summary(
+    model_type: str,
+    run_id: str,
+    rmse: float = None,
+    r2: float = None,
+    env: str = "dev",
+    test_mode: bool = False,
+    accuracy: float = None,
+    precision: float = None,
+    recall: float = None,
+    f1_score: float = None,
 ):
-    from datetime import datetime
+    """
+    Update summary.json in GCS with model metadata.
+    This is the registry used by Airflow to select models for promotion.
+    Updated for BOTH dev and prod environments.
+    """
+    # MLflow artifact URI (where the actual model files are)
+    mlflow_artifact_uri = (
+        f"gs://df_traffic_cyclist1/mlflow-artifacts/{run_id}/artifacts/model/"
+    )
 
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    model_subdir = f"{model_type}/{timestamp}"
-    gcs_model_uri = f"gs://df_traffic_cyclist1/models/{model_subdir}/"
-
-    if env == "prod":
-        result = subprocess.run(  # nosec B603
-            [
-                "gsutil",
-                "-m",
-                "cp",
-                "-r",
-                os.path.join(temp_model_path, model_type),
-                gcs_model_uri,
-            ],
-            check=False,
-            capture_output=True,
-        )
-        cp_success = result.returncode == 0
-
-        if cp_success:
-            update_summary(
-                summary_path="gs://df_traffic_cyclist1/models/summary.json",
-                model_type=model_type,
-                run_id=run_id,
-                rmse=rmse,
-                r2=r2,
-                model_uri=gcs_model_uri,
-                env=env,
-                test_mode=test_mode,
-            )
-            print(f"📤 Modèle {model_type} exporté vers {gcs_model_uri}")
-        else:
-            print(f"❌ Erreur lors de la copie du modèle {model_type} vers GCS")
-
-    shutil.rmtree(temp_model_path)
-    print(f"🧹 Répertoire temporaire supprimé : {temp_model_path}")
+    # Always update summary.json (dev champion training or prod fine-tuning)
+    update_summary(
+        summary_path="gs://df_traffic_cyclist1/models/summary.json",
+        model_type=model_type,
+        run_id=run_id,
+        rmse=rmse,
+        r2=r2,
+        model_uri=mlflow_artifact_uri,
+        env=env,
+        test_mode=test_mode,
+        accuracy=accuracy,
+        precision=precision,
+        recall=recall,
+        f1_score=f1_score,
+    )
+    print(
+        f"📝 summary.json mis à jour pour {model_type} [env={env}] (MLflow URI: {mlflow_artifact_uri})"
+    )
 
 
 def train_rf(X, y, env, test_mode, data_source="reference"):
@@ -136,8 +163,8 @@ def train_rf(X, y, env, test_mode, data_source="reference"):
         mlflow.log_metric("rf_r2_train", r2)
 
         print(f"🎯 RF – RMSE : {rmse:.2f} | R² : {r2:.4f}")
-        # mlflow.log_artifacts("tmp_rf_model", artifact_path="rf_model")
 
+        # Save model locally first
         if env == "prod":
             model_dir = os.path.join("tmp_rf_model", "rf")
         else:
@@ -146,19 +173,31 @@ def train_rf(X, y, env, test_mode, data_source="reference"):
         os.makedirs(model_dir, exist_ok=True)
         rf.save(model_dir)
 
-        # ✅ log après .save()
-        if env == "prod":
-            mlflow.log_artifacts(model_dir, artifact_path="rf_model")
-            log_and_export_model(
-                "rf", rf, "tmp_rf_model", rmse, r2, env, test_mode, run.info.run_id
-            )
+        # Log complete model pipeline to MLflow (uploads to GCS artifact root)
+        mlflow.log_artifacts(model_dir, artifact_path="model")
 
+        # Register model if training on baseline data
+        if data_source == "baseline":
+            model_uri = f"runs:/{run.info.run_id}/model"
+            mlflow.register_model(model_uri, "bike-traffic-rf")
+
+        # Update summary.json in GCS (PROD only)
+        update_model_summary(
+            model_type="rf",
+            run_id=run.info.run_id,
+            rmse=rmse,
+            r2=r2,
+            env=env,
+            test_mode=test_mode,
+        )
+
+        # Clean up temp directory in PROD
+        if env == "prod":
             if os.path.exists("tmp_rf_model"):
                 shutil.rmtree("tmp_rf_model")
                 print("🧹 Dossier temporaire supprimé : tmp_rf_model")
-        else:
-            mlflow.log_artifacts(model_dir, artifact_path="rf_model")
-            print(f"✅ Modèle RF sauvegardé localement dans : {model_dir}")
+
+        print(f"✅ Modèle RF logged to MLflow + sauvegardé dans : {model_dir}")
 
     return {"rmse": rmse, "r2": r2}
 
@@ -194,8 +233,8 @@ def train_nn(X, y, env, test_mode):
         mlflow.log_metric("nn_r2_train", r2)
 
         print(f"🎯 NN – RMSE : {rmse:.2f} | R² : {r2:.4f} | Params: {total_params}")
-        # mlflow.log_artifacts("tmp_nn_model", artifact_path="nn_model")
 
+        # Save model locally first
         if env == "prod":
             model_dir = os.path.join("tmp_nn_model", "nn")
         else:
@@ -204,19 +243,31 @@ def train_nn(X, y, env, test_mode):
         os.makedirs(model_dir, exist_ok=True)
         nn.save(model_dir)
 
-        # ✅ log après .save()
-        if env == "prod":
-            mlflow.log_artifacts(model_dir, artifact_path="nn_model")
-            log_and_export_model(
-                "nn", nn, "tmp_nn_model", rmse, r2, env, test_mode, run.info.run_id
-            )
+        # Log complete model pipeline to MLflow (uploads to GCS artifact root)
+        mlflow.log_artifacts(model_dir, artifact_path="model")
 
+        # Register model if not in test mode
+        if not test_mode:
+            model_uri = f"runs:/{run.info.run_id}/model"
+            mlflow.register_model(model_uri, "bike-traffic-nn")
+
+        # Update summary.json in GCS (PROD only)
+        update_model_summary(
+            model_type="nn",
+            run_id=run.info.run_id,
+            rmse=rmse,
+            r2=r2,
+            env=env,
+            test_mode=test_mode,
+        )
+
+        # Clean up temp directory in PROD
+        if env == "prod":
             if os.path.exists("tmp_nn_model"):
                 shutil.rmtree("tmp_nn_model")
                 print("🧹 Dossier temporaire supprimé : tmp_nn_model")
-        else:
-            mlflow.log_artifacts(model_dir, artifact_path="nn_model")
-            print(f"✅ Modèle NN sauvegardé localement dans : {model_dir}")
+
+        print(f"✅ Modèle NN logged to MLflow + sauvegardé dans : {model_dir}")
 
     return {"rmse": rmse, "r2": r2}
 
@@ -308,7 +359,7 @@ def train_rfc(X_raw, y_unused, env, test_mode):
 def train_model(
     model_type: str,
     data_source: str = "reference",
-    env: str = "prod",
+    env: str = "dev",  # Aligned with CLI default
     hyperparams: dict = None,
     test_mode: bool = False,
 ):
@@ -318,7 +369,7 @@ def train_model(
     Args:
         model_type: "rf", "nn", or "rf_class"
         data_source: "reference", "current", or "baseline" (train_baseline.csv)
-        env: "dev" or "prod"
+        env: "dev" or "prod" (default: "dev")
         hyperparams: dict of hyperparameters (optional)
         test_mode: if True, use small sample (1000 rows) for fast testing
 
@@ -348,15 +399,10 @@ def train_model(
     # Use MLFLOW_TRACKING_URI from env, fallback to localhost for non-docker
     mlflow_uri = os.environ.get("MLFLOW_TRACKING_URI", "http://127.0.0.1:5000")
     mlflow.set_tracking_uri(mlflow_uri)
-    mlflow.set_experiment("traffic_cycliste_experiment")
+    mlflow.set_experiment("bike-traffic-training")  # New experiment with GCS artifacts
     print(f"📡 MLflow tracking URI: {mlflow_uri}")
 
-    # Setup GCS credentials if prod
-    if env == "prod":
-        if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") is None:
-            gcp_credentials_path = "./mlflow-trainer.json"
-            if os.path.exists(gcp_credentials_path):
-                os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_credentials_path
+    # Note: GCS credentials already set at module import
 
     # Load data
     print(f"📊 Loading data from {data_path}...")
@@ -458,5 +504,3 @@ if __name__ == "__main__":
         print(f"Metrics: {result['metrics']}")
         print(f"Model URI: {result['model_uri']}")
         print("=" * 60)
-
-    print(f"🏁 Entraînement terminé ({args.env})")

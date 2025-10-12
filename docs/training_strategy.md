@@ -286,6 +286,188 @@ mlflow.set_tag("base_model", "champion_v1")
 
 ---
 
+## MLflow Artifact Storage Configuration
+
+### Architecture
+
+**Separation of Concerns** (MLflow best practice):
+
+- **Backend Store** (metadata): Local filesystem → `./mlruns_dev/` (Docker volume)
+- **Artifact Store** (models): Google Cloud Storage → `gs://df_traffic_cyclist1/mlflow-artifacts/`
+- **Model Registry** (summary.json): Unified registry for DEV + PROD models in GCS
+
+```yaml
+# docker-compose.yaml
+mlflow:
+  volumes:
+    - ./mlruns_dev:/mlflow/mlruns
+    - ./mlflow-trainer.json:/mlflow/gcp.json:ro  # Service account with bucket write
+  environment:
+    - GOOGLE_APPLICATION_CREDENTIALS=/mlflow/gcp.json
+  command: >
+    mlflow server
+    --backend-store-uri file:///mlflow/mlruns
+    --default-artifact-root gs://df_traffic_cyclist1/mlflow-artifacts
+```
+
+### Critical Configuration
+
+**⚠️ IMPORTANT**:
+
+1. **Experiments** created **before** setting the GCS artifact root will
+   have local artifact locations → cannot upload to GCS!
+2. **Client-side credentials** required: The Python script must have GCS
+   credentials **BEFORE** importing MLflow
+3. **Service account**: Use `mlflow-trainer@` (has bucket write),
+   NOT `streamlit-models@` (read-only)
+
+#### Solution 1: Create experiment with GCS artifact location
+
+```python
+# Run once to create experiment
+import mlflow
+
+mlflow.set_tracking_uri("http://127.0.0.1:5000")
+mlflow.create_experiment(
+    name="bike-traffic-training",
+    artifact_location="gs://df_traffic_cyclist1/mlflow-artifacts"
+)
+```
+
+#### Solution 2: Set credentials BEFORE importing MLflow
+
+```python
+# backend/regmodel/app/train.py
+import os
+
+# CRITICAL: Set GCS credentials BEFORE importing mlflow
+if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") is None:
+    # Priority 1: mlflow-trainer.json (has bucket write permissions)
+    gcp_credentials_path = "./mlflow-trainer.json"
+    if os.path.exists(gcp_credentials_path):
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_credentials_path
+    # Fallback: gcp.json (may have limited permissions)
+    else:
+        gcp_credentials_path = "./gcp.json"
+        if os.path.exists(gcp_credentials_path):
+            os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = gcp_credentials_path
+
+import mlflow  # Now MLflow can authenticate with GCS
+
+mlflow.set_tracking_uri("http://127.0.0.1:5000")
+mlflow.set_experiment("bike-traffic-training")
+
+with mlflow.start_run():
+    # Save model locally first (for custom pipelines)
+    model_dir = "models/rf_prod"
+    rf.save(model_dir)  # Custom RFPipeline.save() → joblib files
+
+    # Upload to GCS artifact store (automatic with correct credentials)
+    mlflow.log_artifacts(model_dir, artifact_path="model")
+
+    # Register model in MLflow (points to GCS artifacts)
+    model_uri = f"runs:/{run.info.run_id}/model"
+    mlflow.register_model(model_uri, "bike-traffic-rf")
+
+    # Update summary.json for Airflow (DEV and PROD)
+    update_model_summary(
+        model_type="rf",
+        run_id=run.info.run_id,
+        rmse=rmse,
+        r2=r2,
+        env=env,  # "dev" or "prod"
+        test_mode=test_mode
+    )
+```
+
+### Model Registry Architecture
+
+**Two complementary registries:**
+
+1. **MLflow Registry** (UI, model versions, lineage)
+   - URL: <http://localhost:5000>
+   - Models: `bike-traffic-rf`, `bike-traffic-nn`
+   - Artifacts: `gs://df_traffic_cyclist1/mlflow-artifacts/{run_id}/artifacts/model/`
+
+2. **summary.json** (Airflow-compatible, simple JSON)
+   - Path: `gs://df_traffic_cyclist1/models/summary.json`
+   - Updated for **BOTH DEV and PROD** training
+   - Used by `dag_monitor_and_train.py` for champion/challenger selection
+
+**Why both?**
+
+- MLflow Registry: Rich metadata, versioning, UI exploration
+- summary.json: Simple programmatic access for Airflow DAGs
+
+**Example summary.json entry:**
+
+```json
+{
+  "timestamp": "2025-10-12T15:37:11.168803",
+  "model_type": "rf",
+  "env": "dev",
+  "test_mode": false,
+  "run_id": "35dc84a2ce7b427b8a3fded8435fef35",
+  "model_uri": "gs://df_traffic_cyclist1/mlflow-artifacts/35dc84a2ce7b427b8a3fded8435fef35/artifacts/model/",
+  "rmse": 47.28,
+  "r2": 0.7920
+}
+```
+
+### Folder Structure
+
+```text
+mlruns_dev/                        # Local metadata (tracked by Docker)
+├── 756670715794819963/            # Experiment ID (bike-traffic-training)
+│   ├── meta.yaml                  # artifact_location: gs://...
+│   └── ee44cf3a4b32.../           # Run ID
+│       ├── meta.yaml              # Run metadata
+│       ├── metrics/               # Metrics (RMSE, R²)
+│       ├── params/                # Hyperparameters
+│       ├── tags/                  # Custom tags
+│       └── artifacts/             # EMPTY (artifacts in GCS)
+
+models/                            # Local DEV backups
+├── rf_prod/                       # RandomForest backup
+├── nn_prod/                       # NeuralNet backup
+└── rf_class/                      # Classifier backup
+```
+
+**GCS Structure**:
+
+```text
+gs://df_traffic_cyclist1/mlflow-artifacts/
+└── {run_id}/
+    └── artifacts/
+        └── model/
+            ├── cleaner.joblib
+            ├── preprocessor.joblib
+            ├── ohe_compteur.joblib
+            └── model.joblib
+```
+
+### Verification
+
+```bash
+# Check experiment artifact location
+python -c "
+import mlflow
+mlflow.set_tracking_uri('http://127.0.0.1:5000')
+exp = mlflow.get_experiment_by_name('bike-traffic-training')
+print(f'Artifact location: {exp.artifact_location}')
+"
+
+# Verify artifacts in GCS
+gsutil ls -r gs://df_traffic_cyclist1/mlflow-artifacts/ | head -20
+
+# Expected output:
+# gs://.../mlflow-artifacts/{run_id}/artifacts/model/cleaner.joblib
+# gs://.../mlflow-artifacts/{run_id}/artifacts/model/model.joblib
+# ...
+```
+
+---
+
 ## Summary
 
 **Hybrid approach rationale**:
