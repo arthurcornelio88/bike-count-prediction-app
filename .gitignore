@@ -21,9 +21,11 @@ data/*.csv
 data/*.parquet
 !data/*.dvc
 
-# Precommit and other lib secret files
+# Linter and formatter caches
 .mypy_cache/
 .ruff_cache/
+
+# Application local configs
 .streamlit/
 
 # models
@@ -51,6 +53,3 @@ summary.json
 
 # dags
 ref_dags/
-
-# Claude
-.claude/
