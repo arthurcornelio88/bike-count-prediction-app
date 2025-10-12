@@ -21,6 +21,11 @@ data/*.csv
 data/*.parquet
 !data/*.dvc
 
+# Precommit and other lib secret files
+.mypy_cache/
+.ruff_cache/
+.streamlit/
+
 # models
 mlruns/
 mlruns_dev/
@@ -46,3 +51,6 @@ summary.json
 
 # dags
 ref_dags/
+
+# Claude
+.claude/

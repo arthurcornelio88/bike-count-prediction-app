@@ -55,7 +55,7 @@ repos:
     rev: v0.42.0
     hooks:
       - id: markdownlint
-        args: [--fix]
+        args: [--fix, --config, .github/linters/.markdownlint.yaml]
 
 # Configure ruff (alternative to black + isort + flake8)
 # Settings can also go in pyproject.toml
