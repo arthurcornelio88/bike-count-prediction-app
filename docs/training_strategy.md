@@ -17,32 +17,58 @@
 
 ---
 
-## Workflow
+## Data Sources
 
-### 1. Initial Setup (Local - One Time)
+### Baseline Data (GCS)
 
 ```bash
-# Train champion model on full baseline
-python scripts/train_champion.py \
-    --train data/train_baseline.csv \
-    --test data/test_baseline.csv \
-    --model-type xgboost \
-    --output models/champion_v1
-
-# Expected: MAE ~12, RMSE ~20, R² ~0.88
-
-# Register in MLflow
-mlflow models register --name bike-traffic-champion --model-uri models/champion_v1
-
-# Upload to GCS
-gsutil -m cp -r models/champion_v1 gs://<your-bucket>/models/champion_v1
+# Environment variables (set in .env.airflow or runtime)
+TRAIN_DATA_PATH=gs://df_traffic_cyclist1/data/train_baseline.csv  # 724k rows
+TEST_DATA_PATH=gs://df_traffic_cyclist1/data/test_baseline.csv    # 181k rows
 ```
+
+**Upload once:**
+
+```bash
+gsutil -m cp data/train_baseline.csv gs://df_traffic_cyclist1/data/
+gsutil -m cp data/test_baseline.csv gs://df_traffic_cyclist1/data/
+```
+
+### Live Data (BigQuery)
+
+```sql
+-- Daily fetch from Paris Open Data API
+SELECT * FROM `bike_traffic_raw.daily_YYYYMMDD`
+```
+
+---
+
+## Workflow
+
+### 1. Initial Champion Training (Local)
+
+```bash
+# Train champion model on baseline data
+python backend/regmodel/app/train.py \
+    --model-type xgboost \
+    --data-source baseline
+
+# Script automatically uses environment variables:
+# - TRAIN_DATA_PATH (from .env or export)
+# - TEST_DATA_PATH (from .env or export)
+```
+
+**Output:**
+
+- Model saved to MLflow (`models:/bike-traffic-champion/latest`)
+- Metrics: MAE ~12, RMSE ~20, R² ~0.88
+- Tags: `dataset=baseline`, `training_type=champion`, `data_source=gcs`
 
 **Why local?**
 
-- Full control over hyperparameters and features
+- Full control over hyperparameters
 - Fast iteration for debugging
-- No cloud costs for initial training
+- No cloud costs for heavy training
 - Can use GPU if available
 
 ---
@@ -58,7 +84,8 @@ def fine_tune_on_fresh_data(**context):
     # Load last 30 days from BigQuery (~2,160 records max)
     query = """
         SELECT * FROM `bike_traffic_raw.daily_*`
-        WHERE _TABLE_SUFFIX >= FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
+        WHERE _TABLE_SUFFIX >= FORMAT_DATE('%Y%m%d',
+            DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY))
     """
     fresh_data = bq_client.query(query).to_dataframe()
 
@@ -73,8 +100,8 @@ def fine_tune_on_fresh_data(**context):
 
     challenger_metrics = response.json()["metrics"]
 
-    # CRITICAL: Evaluate on SAME test_baseline.csv
-    test_baseline = load_from_gcs("gs://<your-bucket>/raw_data/test_baseline.csv")
+    # CRITICAL: Evaluate on SAME test_baseline.csv from GCS
+    test_baseline = pd.read_csv(os.getenv("TEST_DATA_PATH"))
 
     challenger_test_mae = evaluate_model(challenger_metrics, test_baseline)
     champion_test_mae = get_champion_metrics()["mae"]
@@ -96,29 +123,30 @@ def fine_tune_on_fresh_data(**context):
 
 ---
 
-### 3. Quarterly Retrain (Local - Every 3 months)
+### 3. Quarterly Retrain (Local)
 
 ```bash
-# Download production data
+# Download production data (quarterly)
 bq extract --destination_format=CSV \
   'bike_traffic_raw.daily_*' \
-  gs://<your-bucket>/raw_data/bq_export_*.csv
+  gs://df_traffic_cyclist1/exports/bq_export_*.csv
 
 # Merge with baseline
 python scripts/merge_baseline_bq.py \
-    --baseline data/train_baseline.csv \
+    --baseline $TRAIN_DATA_PATH \
     --bq-export data/bq_export_*.csv \
     --output data/new_train_baseline.csv
 
 # Retrain champion from scratch
-python scripts/train_champion.py \
-    --train data/new_train_baseline.csv \
-    --test data/test_baseline.csv \
+python backend/regmodel/app/train.py \
     --model-type xgboost \
-    --output models/champion_v2
+    --data-source custom \
+    --train-path data/new_train_baseline.csv \
+    --test-path $TEST_DATA_PATH
 
-# Evaluate on SAME test set
-# If improved → deploy as new champion
+# If improved → upload new baseline to GCS
+gsutil -m cp data/new_train_baseline.csv \
+  gs://df_traffic_cyclist1/data/train_baseline.csv
 ```
 
 ---
@@ -167,10 +195,21 @@ if eval_challenger["mae"] < eval_champion["mae"] * 0.95:
 ┌─────────────────────────────────────────────────────────┐
 │ INITIAL SETUP (Local - One Time)                       │
 ├─────────────────────────────────────────────────────────┤
-│ 1. Train champion_v1 on train_baseline.csv (local)     │
-│ 2. Evaluate on test_baseline.csv → MAE: ~12            │
-│ 3. Upload to GCS + MLflow registry                     │
-│ 4. Deploy to Cloud Run API                             │
+│ 1. Upload baseline to GCS                              │
+│    gsutil cp train_baseline.csv gs://bucket/data/      │
+│                                                         │
+│ 2. Set environment variables                           │
+│    export TRAIN_DATA_PATH=gs://bucket/data/train...    │
+│    export TEST_DATA_PATH=gs://bucket/data/test...      │
+│                                                         │
+│ 3. Train champion model (local)                        │
+│    python train.py --model-type xgboost \              │
+│                    --data-source baseline              │
+│                                                         │
+│ 4. Metrics: MAE ~12, RMSE ~20, R² ~0.88                │
+│                                                         │
+│ 5. Model saved to MLflow registry                      │
+│    models:/bike-traffic-champion/latest                │
 └─────────────────────────────────────────────────────────┘
                         ↓
 ┌─────────────────────────────────────────────────────────┐
@@ -180,7 +219,7 @@ if eval_challenger["mae"] < eval_champion["mae"] * 0.95:
 │ 2. Drift detection (Evidently vs test_baseline)        │
 │ 3. If NO drift → skip, keep champion                   │
 │ 4. If drift → fine-tune on last 30 days                │
-│ 5. Evaluate challenger on SAME test_baseline.csv       │
+│ 5. Evaluate challenger on test_baseline from GCS       │
 │ 6. Champion/Challenger decision (5% threshold)         │
 │ 7. Log metrics to monitoring_audit.logs                │
 └─────────────────────────────────────────────────────────┘
@@ -189,11 +228,60 @@ if eval_challenger["mae"] < eval_champion["mae"] * 0.95:
 │ QUARTERLY RETRAIN (Local - Every 3 months)             │
 ├─────────────────────────────────────────────────────────┤
 │ 1. Download all BigQuery data (3 months)               │
-│ 2. Merge with train_baseline.csv → new_train.csv       │
-│ 3. Retrain champion_v2 locally (full training)         │
-│ 4. Evaluate on SAME test_baseline.csv                  │
-│ 5. If improved → deploy as new champion                │
+│ 2. Merge with train_baseline → new_train.csv           │
+│ 3. Update TRAIN_DATA_PATH to new baseline              │
+│ 4. Retrain champion locally (full training)            │
+│    python train.py --data-source custom \              │
+│                    --train-path new_train.csv          │
+│ 5. Evaluate on SAME test_baseline                      │
+│ 6. If improved → upload to GCS as new baseline         │
 └─────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Environment Variables Reference
+
+### Required for Training
+
+```bash
+# Set in .env.airflow or shell
+export TRAIN_DATA_PATH=gs://df_traffic_cyclist1/data/train_baseline.csv
+export TEST_DATA_PATH=gs://df_traffic_cyclist1/data/test_baseline.csv
+export GOOGLE_APPLICATION_CREDENTIALS=/path/to/gcp.json
+```
+
+### Usage in Code
+
+```python
+# backend/regmodel/app/train.py
+import os
+
+train_path = os.getenv("TRAIN_DATA_PATH", "data/train_baseline.csv")
+test_path = os.getenv("TEST_DATA_PATH", "data/test_baseline.csv")
+
+# Load from GCS or local
+df_train = pd.read_csv(train_path)
+df_test = pd.read_csv(test_path)
+```
+
+---
+
+## MLflow Tags Strategy
+
+```python
+# Champion training
+mlflow.set_tag("dataset", "baseline")
+mlflow.set_tag("training_type", "champion")
+mlflow.set_tag("data_source", "gcs")
+mlflow.set_tag("train_size", 724000)
+mlflow.set_tag("test_size", 181000)
+
+# Fine-tuning
+mlflow.set_tag("dataset", "last_30_days")
+mlflow.set_tag("training_type", "fine_tune")
+mlflow.set_tag("data_source", "bigquery")
+mlflow.set_tag("base_model", "champion_v1")
 ```
 
 ---
@@ -202,11 +290,20 @@ if eval_challenger["mae"] < eval_champion["mae"] * 0.95:
 
 **Hybrid approach rationale**:
 
-- **Local**: Full control, fast iteration, no cloud costs for heavy training
-- **Production**: Lightweight adaptation, real-time response to drift
-- **Fixed test set**: Valid model comparison across time
-- **Champion/Challenger**: Conservative promotion (5% improvement threshold)
+- **Local champion**: Full control, GCS baseline (724k rows), ~15-30 min
+- **Production fine-tune**: Lightweight, BigQuery recent data (~2k rows), ~5-10 min
+- **Fixed test set**: Same `test_baseline.csv` for all evaluations
+- **Environment variables**: Flexible paths for GCS or local data
+- **Conservative promotion**: 5% improvement threshold for challenger
 
 This strategy balances **production agility** (weekly fine-tuning) with **model quality**
 (quarterly full retraining), ensuring the system adapts to recent patterns while maintaining
 rigorous evaluation standards.
+
+---
+
+**Related Docs:**
+
+- [secrets.md](./secrets.md) — Secret Manager configuration
+- [bigquery_setup.md](./bigquery_setup.md) — BigQuery datasets and baseline upload
+- [dvc.md](./dvc.md) — Data versioning and temporal split

@@ -1,6 +1,8 @@
-# 🗄️ BigQuery Setup & Secrets Configuration
+# 🗄️ BigQuery Setup
 
-**Objectif** : Configurer BigQuery et Google Secret Manager pour le pipeline Airflow MLOps
+**Objectif** : Configurer BigQuery datasets et uploader les données baseline
+
+> **Note:** Pour la configuration des secrets, voir [secrets.md](./secrets.md)
 
 ---
 
@@ -8,9 +10,9 @@
 
 1. [Architecture BigQuery](#architecture-bigquery)
 2. [Création des Datasets BigQuery](#création-des-datasets-bigquery)
-3. [Configuration Secret Manager](#configuration-secret-manager)
-4. [Variables d'environnement locales (DEV)](#variables-denvironnement-locales-dev)
-5. [Validation de la configuration](#validation-de-la-configuration)
+3. [Upload Baseline Data](#upload-baseline-data)
+4. [Schémas des tables](#schémas-des-tables)
+5. [Validation](#validation)
 
 ---
 
@@ -94,200 +96,40 @@ create_monitoring_table_if_needed("datascientest-460618")
 
 ---
 
-## Upload Baseline Data to GCS
+## Upload Baseline Data
 
-The DAGs need access to baseline data (train_baseline.csv) for champion model training and test_baseline.csv for drift detection.
+The champion model needs baseline data uploaded to GCS for training and evaluation.
 
-### Upload train_baseline.csv to GCS
-
-```bash
-# Upload train baseline (~724k records) to GCS
-gsutil -m cp data/train_baseline.csv gs://<your-bucket>/data/train_baseline.csv
-
-# Verify upload
-gsutil ls -lh gs://<your-bucket>/data/
-
-# Expected output:
-# ~200MB  gs://<your-bucket>/data/train_baseline.csv
-```
-
-**Note:** This is a one-time upload. The champion model will be trained on this baseline.
-Daily API fetch will populate BigQuery for production predictions and weekly drift detection.
-
----
-
-## Configuration Secret Manager
-
-### Secrets requis pour PROD
-
-| Secret ID | Description | Exemple de valeur |
-|-----------|-------------|-------------------|
-| `gcs-bucket-bike` | Nom du bucket GCS | `df_traffic_cyclist1` |
-| `bq-project-bike` | ID du projet BigQuery | `datascientest-460618` |
-| `bq-raw-dataset-bike` | Dataset données brutes | `bike_traffic_raw` |
-| `bq-predict-dataset-bike` | Dataset prédictions | `bike_traffic_predictions` |
-| `bq-location` | Location BigQuery | `europe-west1` |
-| `prod-bike-api-url` | URL de l'API RegModel | `https://regmodel-api-467498471756.europe-west1.run.app` |
-| `bike-api-key-secret` | API Key pour sécurité | `super-secret-prod-key-2024` |
-
-### Création des secrets via Console GCP
-
-1. Aller sur [Secret Manager](https://console.cloud.google.com/security/secret-manager)
-2. Cliquer sur **"CREATE SECRET"**
-3. Pour chaque secret :
-   - **Name** : utiliser exactement le `Secret ID` du tableau ci-dessus
-   - **Secret value** : entrer la valeur correspondante
-   - **Regions** : Automatic
-   - Cliquer sur **CREATE**
-
-### Création des secrets via `gcloud` CLI
+### Upload train_baseline.csv
 
 ```bash
-# Activer Secret Manager API
-gcloud services enable secretmanager.googleapis.com --project=datascientest-460618
+# Upload train baseline (~724k records, ~200MB)
+gsutil -m cp data/train_baseline.csv \
+  gs://df_traffic_cyclist1/data/train_baseline.csv
 
-# Créer les secrets
-echo -n "df_traffic_cyclist1" | gcloud secrets create gcs-bucket-bike \
-  --data-file=- \
-  --replication-policy="automatic" \
-  --project=datascientest-460618
-
-echo -n "datascientest-460618" | gcloud secrets create bq-project-bike \
-  --data-file=- \
-  --replication-policy="automatic" \
-  --project=datascientest-460618
-
-echo -n "bike_traffic_raw" | gcloud secrets create bq-raw-dataset-bike \
-  --data-file=- \
-  --replication-policy="automatic" \
-  --project=datascientest-460618
-
-echo -n "bike_traffic_predictions" | gcloud secrets create bq-predict-dataset-bike \
-  --data-file=- \
-  --replication-policy="automatic" \
-  --project=datascientest-460618
-
-echo -n "europe-west1" | gcloud secrets create bq-location \
-  --data-file=- \
-  --replication-policy="automatic" \
-  --project=datascientest-460618
-
-echo -n "https://regmodel-api-467498471756.europe-west1.run.app" | gcloud secrets create prod-bike-api-url \
-  --data-file=- \
-  --replication-policy="automatic" \
-  --project=datascientest-460618
-
-# Générer et créer l'API key (remplacer par une vraie clé forte)
-echo -n "$(openssl rand -base64 32)" | gcloud secrets create bike-api-key-secret \
-  --data-file=- \
-  --replication-policy="automatic" \
-  --project=datascientest-460618
+# Verify
+gsutil ls -lh gs://df_traffic_cyclist1/data/
 ```
 
-### Donner accès aux secrets pour le Service Account
+### Upload test_baseline.csv
 
 ```bash
-# Service Account utilisé par Cloud Run / Airflow
-SERVICE_ACCOUNT="467498471756-compute@developer.gserviceaccount.com"
-
-# Pour chaque secret, donner accès en lecture
-for SECRET_ID in gcs-bucket-bike bq-project-bike bq-raw-dataset-bike bq-predict-dataset-bike bq-location prod-bike-api-url bike-api-key-secret
-do
-  gcloud secrets add-iam-policy-binding $SECRET_ID \
-    --member="serviceAccount:$SERVICE_ACCOUNT" \
-    --role="roles/secretmanager.secretAccessor" \
-    --project=datascientest-460618
-done
+# Upload test baseline (~181k records, ~50MB)
+gsutil -m cp data/test_baseline.csv \
+  gs://df_traffic_cyclist1/data/test_baseline.csv
 ```
 
----
+### Environment Variables
 
-## Variables d'environnement locales (DEV)
-
-### Fichier `.env.airflow` (pour Docker Compose Airflow)
-
-Créer le fichier `.env.airflow` à la racine du projet :
+The training script uses these paths:
 
 ```bash
-# Environment
-ENV=DEV
-GOOGLE_CLOUD_PROJECT=datascientest-460618
-
-# BigQuery
-BQ_PROJECT=datascientest-460618
-BQ_RAW_DATASET=bike_traffic_raw
-BQ_PREDICT_DATASET=bike_traffic_predictions
-BQ_LOCATION=europe-west1
-
-# GCS
-GCS_BUCKET=df_traffic_cyclist1
-
-# API
-API_URL_DEV=http://regmodel-backend:8000
-API_KEY_SECRET=dev-key-unsafe
-
-# Google credentials
-GOOGLE_APPLICATION_CREDENTIALS=/opt/airflow/gcp.json
+# Set in .env.airflow or as environment variables
+TRAIN_DATA_PATH=gs://df_traffic_cyclist1/data/train_baseline.csv
+TEST_DATA_PATH=gs://df_traffic_cyclist1/data/test_baseline.csv
 ```
 
-### Fichier `.env` (pour RegModel backend)
-
-Vérifier que `backend/regmodel/.env` contient :
-
-```bash
-ENV=DEV
-API_KEY_SECRET=dev-key-unsafe
-GOOGLE_APPLICATION_CREDENTIALS=/app/gcp.json
-```
-
----
-
-## Validation de la configuration
-
-### Test 1 : Vérifier les secrets (PROD)
-
-```python
-# test_secrets.py
-from google.cloud import secretmanager
-
-def test_secrets():
-    project_id = "datascientest-460618"
-    client = secretmanager.SecretManagerServiceClient()
-
-    secrets = [
-        "gcs-bucket-bike",
-        "bq-project-bike",
-        "bq-raw-dataset-bike",
-        "bq-predict-dataset-bike",
-        "bq-location",
-        "prod-bike-api-url",
-        "bike-api-key-secret"
-    ]
-
-    for secret_id in secrets:
-        try:
-            name = f"projects/{project_id}/secrets/{secret_id}/versions/latest"
-            response = client.access_secret_version(request={"name": name})
-            value = response.payload.data.decode("UTF-8")
-            print(f"✅ {secret_id}: {value[:20]}...")
-        except Exception as e:
-            print(f"❌ {secret_id}: {e}")
-
-if __name__ == "__main__":
-    test_secrets()
-```
-
-### Test 2 : Vérifier les datasets BigQuery
-
-```bash
-# Liste les datasets
-bq ls --project_id=datascientest-460618
-
-# Expected output:
-#   bike_traffic_raw
-#   bike_traffic_predictions
-#   monitoring_audit
-```
+**Note:** Daily API fetch populates BigQuery for production predictions, not for training.
 
 ---
 
@@ -337,18 +179,59 @@ CREATE TABLE `datascientest-460618.monitoring_audit.logs` (
 
 ---
 
-## Checklist finale
+## Validation
 
-- [ ] 3 datasets BigQuery créés (`bike_traffic_raw`, `bike_traffic_predictions`, `monitoring_audit`)
-- [ ] Train baseline uploaded to GCS (`gs://<your-bucket>/raw_data/train_baseline.csv`)
-- [ ] Test baseline uploaded to GCS (`gs://<your-bucket>/raw_data/test_baseline.csv`)
-- [ ] 7 secrets créés dans Secret Manager
-- [ ] Service Account a accès aux secrets (rôle `secretmanager.secretAccessor`)
-- [ ] Fichier `.env.airflow` créé avec variables DEV
-- [ ] Fichier `gcp.json` présent et monté dans Docker
-- [ ] Test de connexion BigQuery réussi
-- [ ] Test de lecture Secret Manager réussi
+### Verify Datasets
+
+```bash
+# List all datasets
+bq ls --project_id=datascientest-460618
+
+# Expected: bike_traffic_raw, bike_traffic_predictions, monitoring_audit
+```
+
+### Verify GCS Uploads
+
+```bash
+# List uploaded files
+gsutil ls -lh gs://df_traffic_cyclist1/data/
+
+# Expected output:
+# ~200MB  train_baseline.csv
+# ~50MB   test_baseline.csv
+```
+
+### Test BigQuery Write
+
+```python
+# Quick test
+import pandas as pd
+
+df = pd.DataFrame({"test": [1, 2, 3]})
+df.to_gbq(
+    "bike_traffic_raw.test_table",
+    project_id="datascientest-460618",
+    if_exists="replace"
+)
+print("✅ BigQuery write successful")
+```
 
 ---
 
-**Prêt pour le déploiement des DAGs Airflow !** 🚀
+## Checklist
+
+- [ ] 3 datasets created (`bike_traffic_raw`, `bike_traffic_predictions`, `monitoring_audit`)
+- [ ] `train_baseline.csv` uploaded to GCS
+- [ ] `test_baseline.csv` uploaded to GCS
+- [ ] Environment variables `TRAIN_DATA_PATH` and `TEST_DATA_PATH` set
+- [ ] GCS bucket accessible (test with `gsutil ls`)
+- [ ] BigQuery write permissions verified
+- [ ] Secrets configured (see [secrets.md](./secrets.md))
+
+---
+
+**Next Steps:**
+
+- Configure secrets → [secrets.md](./secrets.md)
+- Review training strategy → [training_strategy.md](./training_strategy.md)
+- Deploy Airflow DAGs → [architecture.md](./architecture.md)
