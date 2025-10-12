@@ -104,7 +104,7 @@ print("-" * 80)
 api_url = "https://opendata.paris.fr/api/explore/v2.1/catalog/datasets/comptage-velo-donnees-compteurs/records"
 
 # Test 1: Obtenir les statistiques globales
-params_stats = {
+params_stats: dict[str, str | int] = {
     "limit": 0,  # Juste pour obtenir le total_count
     "timezone": "Europe/Paris",
 }
@@ -123,7 +123,7 @@ else:
     exit(1)
 
 # Test 2: Date la plus ancienne disponible dans l'API
-params_oldest = {
+params_oldest: dict[str, str | int] = {
     "limit": 1,
     "order_by": "date ASC",
     "timezone": "Europe/Paris",
@@ -146,7 +146,7 @@ else:
     api_min_date = None
 
 # Test 3: Date la plus récente disponible dans l'API
-params_newest = {
+params_newest: dict[str, str | int] = {
     "limit": 1,
     "order_by": "date DESC",
     "timezone": "Europe/Paris",
@@ -169,7 +169,7 @@ else:
     api_max_date = None
 
 # Test 4: Qualité des données API (sample de 100 records récents)
-params_sample = {
+params_sample: dict[str, str | int] = {
     "limit": 100,
     "where": "sum_counts > 0",
     "order_by": "date DESC",

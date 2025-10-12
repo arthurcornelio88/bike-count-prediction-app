@@ -72,13 +72,18 @@ pytest.ini                     ✅ Configuration
 
 **Implementation completed** ✅
 
-📚 **Documentation**: [docs/backend.md](docs/backend.md#train---train-and-upload-model)
+📚 **Documentation**:
+
+- [docs/backend.md](docs/backend.md#train---train-and-upload-model)
+- [docs/training_strategy.md](docs/training_strategy.md) — Hybrid training workflow
+- [docs/mlflow_cloudsql.md](docs/mlflow_cloudsql.md) — Cloud SQL setup
 
 **Objectifs** :
 
 - ✅ Refactor training logic into unified `train_model()` function
 - ✅ Create FastAPI `/train` endpoint for remote training
 - ✅ Integrate MLflow tracking in docker-compose stack
+- ✅ **MLflow Cloud SQL backend** for centralized team collaboration
 - ✅ Support DVC-tracked datasets (reference/current)
 - ✅ Automatic GCS upload + `summary.json` update
 
@@ -86,7 +91,8 @@ pytest.ini                     ✅ Configuration
 
 - ✅ `train_model()` function in [train.py:256](backend/regmodel/app/train.py#L256)
 - ✅ `/train` endpoint in [fastapi_app.py:101](backend/regmodel/app/fastapi_app.py#L101)
-- ✅ Docker Compose with RegModel API + MLflow server
+- ✅ Docker Compose with RegModel API + MLflow server + Cloud SQL Proxy
+- ✅ **Cloud SQL PostgreSQL** backend (`mlflow-metadata` instance)
 - ✅ UV-optimized Dockerfile ([backend/regmodel/Dockerfile](backend/regmodel/Dockerfile))
 - ✅ Dedicated pyproject.toml for RegModel service
 - ✅ MLflow tracking already integrated in `train_rf()`, `train_nn()`, `train_rfc()`
@@ -95,15 +101,20 @@ pytest.ini                     ✅ Configuration
 
 ```yaml
 services:
+  cloud-sql-proxy:
+    - Proxies connection to Cloud SQL PostgreSQL
+    - Instance: datascientest-460618:europe-west3:mlflow-metadata
+    - Requires: roles/cloudsql.client on service account
+
   mlflow:
     - Tracking server on port 5000
-    - Backend store: ./mlruns_dev
-    - Artifacts: ./mlflow_artifacts
-    - Healthcheck enabled
+    - Backend store: Cloud SQL PostgreSQL (metadata)
+    - Artifact store: gs://df_traffic_cyclist1/mlflow-artifacts/
+    - Benefits: Shared team tracking, persistent, scalable
 
   regmodel-backend:
     - FastAPI on port 8000
-    - Depends on MLflow (healthcheck)
+    - Depends on MLflow
     - Mounts: code, GCS credentials, data
     - Hot reload enabled (dev mode)
 ```
@@ -111,12 +122,12 @@ services:
 **API Usage**:
 
 ```bash
-# Train RF model on reference data
+# Train RF model on baseline data
 curl -X POST "http://localhost:8000/train" \
   -H "Content-Type: application/json" \
   -d '{
     "model_type": "rf",
-    "data_source": "reference",
+    "data_source": "baseline",
     "env": "prod"
   }'
 
@@ -141,16 +152,26 @@ curl -X POST "http://localhost:8000/train" \
 
 - ✅ Full stack tested: `docker compose up` works
 - ✅ MLflow UI accessible at <http://localhost:5000>
+- ✅ Cloud SQL proxy connection verified (europe-west3)
+- ✅ Service account permissions configured (`roles/cloudsql.client`)
 - ✅ `/train` endpoint tested with RF, NN models
-- ✅ Test mode (`test_mode=true`) working with `test_sample.csv` (6s for NN, ~30s for RF)
+- ✅ Test mode (`test_mode=true`) working with `test_sample.csv`
 - ✅ Metrics correctly returned in API response (RMSE, R²)
-- ✅ MLflow tracking confirmed (runs, metrics, tags, artifacts)
+- ✅ MLflow tracking confirmed (runs, metrics, tags, artifacts to GCS)
 
 ---
 
 ### **Phase 3 : Orchestration Airflow + Monitoring Production** (`feat/mlops-airflow-pipeline`)
 
 **Status**: 🔄 In Progress
+
+**Progress Summary:**
+
+- ✅ MLflow Cloud SQL backend configured (team collaboration enabled)
+- ✅ DAG files implemented (3/3): `dag_daily_fetch_data.py`, `dag_daily_prediction.py`, `dag_monitor_and_train.py`
+- 🔄 **Next step:** Deploy Airflow stack via docker-compose
+- ⏳ BigQuery datasets creation pending
+- ⏳ Prometheus + Grafana monitoring pending
 
 **Objectifs unifiés** :
 

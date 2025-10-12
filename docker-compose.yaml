@@ -16,12 +16,6 @@ services:
       - GOOGLE_APPLICATION_CREDENTIALS=/config
     env_file:
       - .env
-    healthcheck:
-      test: ["CMD", "wget", "--spider", "-q", "http://localhost:8090/startup"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
-      start_period: 10s
     restart: unless-stopped
 
   # ========================================
@@ -40,10 +34,10 @@ services:
     env_file:
       - .env
     depends_on:
-      cloud-sql-proxy:
-        condition: service_healthy
+      - cloud-sql-proxy
     # Install dependencies and start MLflow with Cloud SQL backend
-    entrypoint: /bin/bash -c "pip install google-cloud-storage psycopg2-binary && mlflow server --backend-store-uri $$MLFLOW_BACKEND_STORE_URI --default-artifact-root gs://df_traffic_cyclist1/mlflow-artifacts --host 0.0.0.0 --port 5000"
+    # Wait for proxy to be ready before starting MLflow
+    entrypoint: /bin/bash -c "pip install google-cloud-storage psycopg2-binary && echo 'Waiting for Cloud SQL proxy...' && python -c \"import socket, time, sys; [(sys.exit(0) if socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect_ex(('cloud-sql-proxy', 5432)) == 0 else time.sleep(2)) for _ in range(30)]\" && mlflow server --backend-store-uri $$MLFLOW_BACKEND_STORE_URI --default-artifact-root gs://df_traffic_cyclist1/mlflow-artifacts --host 0.0.0.0 --port 5000"
     restart: unless-stopped
 
   # ========================================

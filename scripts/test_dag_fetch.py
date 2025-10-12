@@ -13,7 +13,7 @@ print("=" * 80)
 # URL et paramètres EXACTS du DAG actuel
 api_url = "https://opendata.paris.fr/api/explore/v2.1/catalog/datasets/comptage-velo-donnees-compteurs/records"
 
-params = {
+params: dict[str, str | int] = {
     "limit": 100,  # Max autorisé par l'API
     "order_by": "date DESC",  # API v2.1 utilise 'date' pas 'date_et_heure_de_comptage'
     "timezone": "Europe/Paris",

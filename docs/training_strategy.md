@@ -93,12 +93,51 @@ python backend/regmodel/app/train.py \
 1. **Setup:** Loads GCS credentials (`mlflow-trainer.json` for artifact upload)
 2. **Data Loading:** Reads from `$TRAIN_DATA_PATH` (GCS or local fallback)
 3. **Training:** Fits custom pipeline (cleaning → feature engineering → model)
+
+   ![Training Pipeline NN](img/nn_train.png)
+
+   *Figure 1: Neural Network training pipeline with custom transformers*
+
 4. **Evaluation:** Computes metrics on training set (RMSE, R²)
 5. **MLflow Logging:**
-   - Artifacts uploaded to `gs://df_traffic_cyclist1/mlflow-artifacts/{run_id}/`
-   - Metadata uploaded to `gs://df_traffic_cyclist1/mlflow-backend/` (experiments, runs, metrics)
-   - Model registered in MLflow Registry (`bike-traffic-rf` version X)
-6. **Summary Update:** `gs://bucket/models/summary.json` updated with run info for Airflow
+
+- Metadata uploaded to Cloud SQL PostgreSQL (experiments, runs, metrics)
+- Model registered in MLflow Registry (`bike-traffic-rf` version X)
+
+  ![MLflow UI Tracking](img/nn_mlflow.png)
+
+  *Figure 2: MLflow UI showing experiment tracking and metrics*
+
+- Artifacts uploaded to `gs://df_traffic_cyclist1/mlflow-artifacts/{run_id}/`
+
+  ![MLflow Artifacts View](img/artifacts_mlflow_nn.png)
+
+  *Figure 3: MLflow artifact storage showing model components (cleaner, model, OHE, preprocessor)*
+
+6. **GCS Artifact Bucket (what's stored where)**
+
+- Top-level buckets
+  - `gs://df_traffic_cyclist1/mlflow-artifacts/` — MLflow artifacts (per-experiment, per-run folders)
+  - `gs://df_traffic_cyclist1/models/` — exported model bundles and `summary.json`
+
+- Typical artifact layout:
+
+    gs://df_traffic_cyclist1/mlflow-artifacts/{experiment_id}/{run_id}/artifacts/model/
+
+  ![GCS Artifact Storage](img/artifacts_gcs_nn.png)
+
+  *Figure 4: GCS bucket structure with MLflow artifacts and model files*
+
+7. **Summary Update:** `gs://df_traffic_cyclist1/models/summary.json` updated with run info for Airflow
+
+- The `summary.json` file is appended with a new entry after each training run. It contains metadata
+    used by Airflow to select and download candidate models for promotion.
+
+- Example entry snapshot:
+
+    ![Summary JSON](img/summary_json_example.png)
+
+    *Figure 5: Example `summary.json` entry (timestamp, model_type, run_id, model_uri, metrics)*
 
 #### 1.4 Expected Metrics (Baseline Data)
 
@@ -241,9 +280,11 @@ The training system uses **MLflow** for experiment tracking and model registry:
    - Connection: Via Cloud SQL Proxy in docker-compose
    - Benefits: Shared, persistent, scalable metadata storage
 2. **Artifact Store** (models): `gs://df_traffic_cyclist1/mlflow-artifacts/`
-   - ✅ All model files (joblib, weights) stored on GCS
-   - ✅ Accessible from anywhere with proper credentials
-   - ✅ This is the critical storage (models are the source of truth)
+
+- ✅ All model files (joblib, weights) are stored on GCS.
+- ✅ Artifacts are accessible remotely with proper credentials.
+- ✅ This bucket contains the canonical model files — treat it as the source of truth.
+
 3. **Model Registry**: MLflow UI + `summary.json` for Airflow
    - MLflow UI: Rich versioning, lineage, comparison (metadata-driven)
    - summary.json: Programmatic access for DAGs (artifact-driven, reliable)
@@ -252,57 +293,36 @@ The training system uses **MLflow** for experiment tracking and model registry:
 
 **For Training Script (Client):**
 
-The Python script must authenticate **before** importing MLflow:
+The training script (`train.py`) must authenticate to GCS before importing MLflow. This
+ensures artifact uploads succeed when the script runs. The code checks the
+`GOOGLE_APPLICATION_CREDENTIALS` environment variable and falls back to
+`./mlflow-trainer.json` when needed (this happens at module import time).
 
-```python
-# Set at module level (train.py lines 1-20)
-import os
+**Service Account needed:** `mlflow-trainer@datascientest-460618.iam.gserviceaccount.com`
+with `roles/storage.objectAdmin` for GCS bucket access.
 
-if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") is None:
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "./mlflow-trainer.json"
+**For MLflow Server (Docker):**
 
-import mlflow  # Now can upload to GCS
-```
+The MLflow stack is configured in `docker-compose.yaml` with two service accounts:
 
-**For MLflow Server (Docker with Cloud SQL):**
+1. **Cloud SQL Proxy** (`gcp.json`):
+   - Service Account: `streamlit-models@datascientest-460618.iam.gserviceaccount.com`
+   - Role Required: `roles/cloudsql.client`
+   - Purpose: Connect to Cloud SQL PostgreSQL instance for metadata storage
 
-```yaml
-# docker-compose.yaml
-cloud-sql-proxy:
-  image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:latest
-  command:
-    - "--address=0.0.0.0"
-    - "--port=5432"
-    - "--health-check"
-    - "${MLFLOW_INSTANCE_CONNECTION}"
-  volumes:
-    - ./gcp.json:/config:ro
-  environment:
-    - GOOGLE_APPLICATION_CREDENTIALS=/config
+2. **MLflow Server** (`mlflow-ui-access.json`):
+   - Service Account: `mlflow-ui-access@datascientest-460618.iam.gserviceaccount.com`
+   - Role Required: `roles/storage.objectViewer`
+   - Purpose: Read artifacts from GCS for UI display
 
-mlflow:
-  volumes:
-    - ./mlflow-ui-access.json:/mlflow/gcp.json:ro
-  environment:
-    - GOOGLE_APPLICATION_CREDENTIALS=/mlflow/gcp.json
-    - MLFLOW_BACKEND_STORE_URI=postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@cloud-sql-proxy:5432/${MLFLOW_DB_NAME}
-  depends_on:
-    - cloud-sql-proxy
-  entrypoint: >
-    /bin/bash -c "sleep 10 && pip install google-cloud-storage psycopg2-binary &&
-    mlflow server --backend-store-uri $$MLFLOW_BACKEND_STORE_URI
-                  --default-artifact-root gs://df_traffic_cyclist1/mlflow-artifacts
-                  --host 0.0.0.0 --port 5000"
-```
+**Cloud SQL Backend:**
 
-**Cloud SQL Setup:**
+- Instance: `mlflow-metadata` (europe-west3)
+- Database: `mlflow` (user: `mlflow_user`)
+- Connection: Via Cloud SQL Proxy on port 5432
+- Benefits: Centralized team tracking, persistent, scalable
 
-```bash
-# Already completed via scripts/setup_mlflow_db.sh
-# Instance: mlflow-metadata (europe-west3)
-# Database: mlflow, User: mlflow_user
-# Password stored in Secret Manager: mlflow-db-password
-```
+See [mlflow_cloudsql.md](./mlflow_cloudsql.md) for complete setup details and troubleshooting.
 
 ### Model Registry (Dual System)
 

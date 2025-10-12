@@ -97,6 +97,7 @@ def update_model_summary(
     r2: float = None,
     env: str = "dev",
     test_mode: bool = False,
+    model_uri: str = None,
     accuracy: float = None,
     precision: float = None,
     recall: float = None,
@@ -108,9 +109,12 @@ def update_model_summary(
     Updated for BOTH dev and prod environments.
     """
     # MLflow artifact URI (where the actual model files are)
-    mlflow_artifact_uri = (
-        f"gs://df_traffic_cyclist1/mlflow-artifacts/{run_id}/artifacts/model/"
-    )
+    if model_uri is None:
+        # Do not fabricate a gs:// link when we don't have a real artifact URI.
+        # Prefer an explicit 'not found' marker so callers know the artifact wasn't available.
+        mlflow_artifact_uri = "not found"
+    else:
+        mlflow_artifact_uri = model_uri
 
     # Always update summary.json (dev champion training or prod fine-tuning)
     update_summary(
@@ -176,12 +180,15 @@ def train_rf(X, y, env, test_mode, data_source="reference"):
             # Log complete model pipeline to MLflow (uploads to GCS artifact root)
             mlflow.log_artifacts(model_dir, artifact_path="model")
 
+            # Get exact artifact URI from MLflow (ensures correct gs:// path)
+            artifact_uri = mlflow.get_artifact_uri("model")
+
         # Register model if training on baseline data
         if data_source == "baseline":
             model_uri = f"runs:/{run.info.run_id}/model"
             mlflow.register_model(model_uri, "bike-traffic-rf")
 
-        # Update summary.json in GCS (PROD only)
+        # Update summary.json in GCS
         update_model_summary(
             model_type="rf",
             run_id=run.info.run_id,
@@ -189,6 +196,7 @@ def train_rf(X, y, env, test_mode, data_source="reference"):
             r2=r2,
             env=env,
             test_mode=test_mode,
+            model_uri=artifact_uri,
         )
 
         # Clean up temp directory in PROD
@@ -199,7 +207,13 @@ def train_rf(X, y, env, test_mode, data_source="reference"):
 
         print(f"✅ Modèle RF logged to MLflow + sauvegardé dans : {model_dir}")
 
-    return {"rmse": rmse, "r2": r2}
+    # Return metrics + real run id and model uri
+    return {
+        "rmse": rmse,
+        "r2": r2,
+        "run_id": run.info.run_id,
+        "model_uri": artifact_uri,
+    }
 
 
 def train_nn(X, y, env, test_mode):
@@ -245,6 +259,9 @@ def train_nn(X, y, env, test_mode):
             # Log complete model pipeline to MLflow (uploads to GCS artifact root)
             mlflow.log_artifacts(model_dir, artifact_path="model")
 
+            # Get exact artifact URI from MLflow
+            artifact_uri = mlflow.get_artifact_uri("model")
+
         # Register model if not in test mode
         if not test_mode:
             model_uri = f"runs:/{run.info.run_id}/model"
@@ -258,11 +275,18 @@ def train_nn(X, y, env, test_mode):
             r2=r2,
             env=env,
             test_mode=test_mode,
+            model_uri=artifact_uri,
         )
 
         print("✅ Modèle NN logged to MLflow (artifacts uploaded to GCS)")
 
-    return {"rmse": rmse, "r2": r2}
+    # Return metrics + real run id and model uri
+    return {
+        "rmse": rmse,
+        "r2": r2,
+        "run_id": run.info.run_id,
+        "model_uri": artifact_uri,
+    }
 
 
 def train_rfc(X_raw, y_unused, env, test_mode):
@@ -406,27 +430,27 @@ def train_model(
         # TODO: Use hyperparams if provided
         metrics = train_rf(X, y, env, test_mode, data_source)
         return {
-            "run_id": "rf_" + datetime.now().strftime("%Y%m%d_%H%M%S"),
-            "metrics": metrics,
-            "model_uri": "gs://df_traffic_cyclist1/models/rf/",
+            "run_id": metrics.get("run_id"),
+            "metrics": {k: metrics[k] for k in ("rmse", "r2") if k in metrics},
+            "model_uri": metrics.get("model_uri"),
         }
 
     elif model_type == "nn":
         # TODO: Use hyperparams if provided
         metrics = train_nn(X, y, env, test_mode)
         return {
-            "run_id": "nn_" + datetime.now().strftime("%Y%m%d_%H%M%S"),
-            "metrics": metrics,
-            "model_uri": "gs://df_traffic_cyclist1/models/nn/",
+            "run_id": metrics.get("run_id"),
+            "metrics": {k: metrics[k] for k in ("rmse", "r2") if k in metrics},
+            "model_uri": metrics.get("model_uri"),
         }
 
     elif model_type == "rf_class":
         df_raw = load_and_clean_data(data_path, preserve_target=True)
         metrics = train_rfc(df_raw, None, env, test_mode)
         return {
-            "run_id": "rf_class_" + datetime.now().strftime("%Y%m%d_%H%M%S"),
+            "run_id": metrics.get("run_id"),
             "metrics": metrics,
-            "model_uri": "gs://df_traffic_cyclist1/models/rf_class/",
+            "model_uri": metrics.get("model_uri"),
         }
 
     else:

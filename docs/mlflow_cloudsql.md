@@ -1,173 +1,98 @@
-# MLflow Cloud SQL Setup
+# MLflow + Cloud SQL (concise)
 
-## Overview
+Ce document explique rapidement comment utiliser Cloud SQL (Postgres) comme backend
+store MLflow et GCS comme stockage d'artefacts. L'objectif : une configuration simple,
+partageable et reproductible pour l'équipe.
 
-MLflow backend store migrated from local filesystem to **Cloud SQL PostgreSQL** for:
+## En bref
 
-- ✅ Persistent metadata (experiments, runs, metrics)
-- ✅ Shared across environments
-- ✅ Automatic backups
-- ✅ Scalable and reliable
+- Backend metadata : Cloud SQL (Postgres) — centralisé, sauvegardé, partagé
+- Artefacts : Google Cloud Storage — gs://df_traffic_cyclist1/mlflow-artifacts/
+- Connexion : Cloud SQL Proxy (pas d'IP publique requise)
 
-## Infrastructure
+## Principales valeurs
 
-**Instance:** `mlflow-metadata`
-**Region:** `europe-west3` (Frankfurt)
-**Database:** `mlflow`
-**User:** `mlflow_user`
+- Instance : `mlflow-metadata` (region `europe-west3`)
+- Base : `mlflow` — utilisateur `mlflow_user`
+- Variable d'environnement : `MLFLOW_INSTANCE_CONNECTION` (format : PROJECT:REGION:INSTANCE)
 
-## Setup Steps
+## Étapes rapides
 
-### 1. Create Cloud SQL Instance (DONE)
+1) Créer l'instance Cloud SQL (exemple minimal) :
 
 ```bash
 gcloud sql instances create mlflow-metadata \
-    --database-version=POSTGRES_14 \
-    --tier=db-f1-micro \
-    --region=europe-west3 \
-    --storage-type=SSD \
-    --storage-size=10GB \
-    --backup \
-    --backup-start-time=03:00
+  --database-version=POSTGRES_14 \
+  --tier=db-f1-micro \
+  --region=europe-west3 \
+  --storage-size=10GB
 ```
 
-**Status:** Check with `gcloud sql instances list`
-
-### 2. Create Database and User
-
-Once instance is `RUNNABLE`, run:
+2) Créer la base et l'utilisateur (enregistrer le mot de passe de façon sécurisée) :
 
 ```bash
-./scripts/setup_mlflow_db.sh
+gcloud sql databases create mlflow --instance=mlflow-metadata
+PASSWORD=$(openssl rand -base64 32)
+gcloud sql users create mlflow_user --instance=mlflow-metadata --password="$PASSWORD"
+# stocker $PASSWORD dans Secret Manager ou un vault
 ```
 
-This will:
+3) Définir les variables d'environnement (ou `.env`) :
 
-- Create `mlflow` database
-- Create `mlflow_user` with strong password
-- Save password to Secret Manager
-- Output connection string
+```bash
+echo "MLFLOW_DB_USER=mlflow_user" >> .env
+echo "MLFLOW_DB_PASSWORD=$PASSWORD" >> .env
+echo "MLFLOW_DB_NAME=mlflow" >> .env
+echo "MLFLOW_INSTANCE_CONNECTION=PROJECT:REGION:mlflow-metadata" >> .env
+```
 
-### 3. Update Docker Compose
+4) Donner le rôle `roles/cloudsql.client` au compte de service utilisé par le proxy :
 
-The `docker-compose.yaml` will be updated to use Cloud SQL Proxy:
+```bash
+gcloud projects add-iam-policy-binding <PROJECT_ID> \
+  --member="serviceAccount:YOUR_SA@<PROJECT_ID>.iam.gserviceaccount.com" \
+  --role="roles/cloudsql.client"
+```
+
+5) Exemple minimal `docker-compose` (seulement les points essentiels) :
+
+```yaml
+services:
+  cloud-sql-proxy:
+    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:latest
+    volumes:
+      - ./gcp.json:/config:ro
+    env_file: [ .env ]
+
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.22.0
+    env_file: [ .env ]
+    environment:
+      - MLFLOW_BACKEND_STORE_URI=postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@cloud-sql-proxy:5432/${MLFLOW_DB_NAME}
+    depends_on: [ cloud-sql-proxy ]
+```
+
+6) Démarrer les services :
+
+```bash
+docker compose up -d cloud-sql-proxy mlflow
+```
+
+## Coûts et optimisations
+
+- `db-f1-micro` : faible coût pour développement (~€5–10/mois)
+- Monter en gamme (`db-g1-small`) si besoin de CPU/mémoire
+
+## Revenir au stockage local
+
+Si nécessaire, on peut repasser à un backend local :
 
 ```yaml
 mlflow:
-  image: ghcr.io/mlflow/mlflow:v2.22.0
-  depends_on:
-    - cloud-sql-proxy
-  environment:
-    - MLFLOW_BACKEND_STORE_URI=postgresql://mlflow_user:PASSWORD@cloud-sql-proxy:5432/mlflow
-    - GOOGLE_APPLICATION_CREDENTIALS=/mlflow/gcp.json
-  entrypoint: >
-    /bin/bash -c "pip install google-cloud-storage psycopg2-binary &&
-    mlflow server --backend-store-uri ${MLFLOW_BACKEND_STORE_URI}
-                  --default-artifact-root gs://bucket/mlflow-artifacts
-                  --host 0.0.0.0 --port 5000"
-
-cloud-sql-proxy:
-  image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:latest
-  command:
-    - "--private-ip"
-    - "datascientest-460618:europe-west3:mlflow-metadata"
-  volumes:
-    - ./gcp.json:/config/gcp.json:ro
-  environment:
-    - GOOGLE_APPLICATION_CREDENTIALS=/config/gcp.json
+  command: mlflow server --backend-store-uri file:///mlflow/mlruns --default-artifact-root gs://df_traffic_cyclist1/mlflow-artifacts --host 0.0.0.0 --port 5000
 ```
 
-### 4. Test Connection
+## Liens utiles
 
-```bash
-# Get connection name
-CONNECTION_NAME=$(gcloud sql instances describe mlflow-metadata --format='value(connectionName)')
-
-# Test with Cloud SQL Proxy
-cloud-sql-proxy ${CONNECTION_NAME} &
-psql "host=127.0.0.1 port=5432 dbname=mlflow user=mlflow_user"
-```
-
-### 5. Migrate Existing Data (Optional)
-
-If you have existing runs in `mlruns_dev/`:
-
-```bash
-# Export existing experiments
-mlflow experiments search --view all > experiments_backup.json
-
-# After connecting to Cloud SQL, experiments will be recreated
-# Artifacts remain in GCS (no migration needed)
-```
-
-## Secrets Management
-
-Store password in Secret Manager:
-
-```bash
-# Set password secret
-gcloud secrets create mlflow-db-password \
-    --data-file=- <<< "YOUR_PASSWORD"
-
-# Grant access to service account
-gcloud secrets add-iam-policy-binding mlflow-db-password \
-    --member="serviceAccount:mlflow-trainer@datascientest-460618.iam.gserviceaccount.com" \
-    --role="roles/secretmanager.secretAccessor"
-```
-
-## Costs
-
-**db-f1-micro:**
-
-- ~$7/month (shared CPU, 0.6GB RAM)
-- Includes 10GB SSD storage
-- Daily backups
-
-**Optimization:**
-
-- Consider `db-g1-small` if performance issues (~$25/month)
-- Delete instance when not training to save costs
-
-## Troubleshooting
-
-### Connection refused
-
-```bash
-# Check instance status
-gcloud sql instances describe mlflow-metadata --format="value(state)"
-
-# Check Cloud SQL Proxy logs
-docker logs cloud-sql-proxy
-```
-
-### Authentication errors
-
-```bash
-# Verify service account permissions
-gcloud projects get-iam-policy datascientest-460618 \
-    --flatten="bindings[].members" \
-    --filter="bindings.members:mlflow-trainer@"
-```
-
-Required roles:
-
-- `roles/cloudsql.client` (connect via proxy)
-- `roles/secretmanager.secretAccessor` (read password)
-
-## Rollback
-
-To revert to local filesystem:
-
-```bash
-# docker-compose.yaml
---backend-store-uri file:///mlflow/mlruns
-
-# Remove cloud-sql-proxy service
-# Restart MLflow
-docker compose up mlflow -d
-```
-
-## Related Docs
-
-- [Cloud SQL Best Practices](https://cloud.google.com/sql/docs/postgres/best-practices)
-- [MLflow Tracking](https://mlflow.org/docs/latest/tracking.html#backend-stores)
+- training_strategy.md — intégration MLflow et workflow
+- secrets.md — gestion des comptes de service et secrets
