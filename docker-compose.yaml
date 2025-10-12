@@ -8,12 +8,13 @@ services:
     ports:
       - "5000:5000"
     volumes:
-      - ./mlruns_dev:/mlflow/mlruns
-      - ./mlflow_artifacts:/mlflow/artifacts
-      - ./mlflow-ui-access.json:/mlflow/gcp.json:ro  # Service account with bucket read access
+      - ./mlruns_dev:/mlflow/mlruns  # Local metadata (TODO: migrate to Cloud SQL for production)
+      - ./mlflow-ui-access.json:/mlflow/gcp.json:ro  # Service account with bucket read/write access
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/mlflow/gcp.json
     # Install google-cloud-storage before starting MLflow server
+    # Backend store: Local filesystem (MLflow doesn't support GCS backend - requires PostgreSQL/MySQL for production)
+    # Artifact store: GCS for model files
     entrypoint: /bin/bash -c "pip install google-cloud-storage && mlflow server --backend-store-uri file:///mlflow/mlruns --default-artifact-root gs://df_traffic_cyclist1/mlflow-artifacts --host 0.0.0.0 --port 5000"
 
   # ========================================

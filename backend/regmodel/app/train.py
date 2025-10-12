@@ -164,17 +164,17 @@ def train_rf(X, y, env, test_mode, data_source="reference"):
 
         print(f"🎯 RF – RMSE : {rmse:.2f} | R² : {r2:.4f}")
 
-        # Save model locally first
-        if env == "prod":
-            model_dir = os.path.join("tmp_rf_model", "rf")
-        else:
-            model_dir = os.path.join("models", "rf_prod")
+        # Save model to temporary directory for MLflow upload
+        import tempfile
+        import shutil
 
-        os.makedirs(model_dir, exist_ok=True)
-        rf.save(model_dir)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model_dir = os.path.join(tmp_dir, "model")
+            os.makedirs(model_dir, exist_ok=True)
+            rf.save(model_dir)
 
-        # Log complete model pipeline to MLflow (uploads to GCS artifact root)
-        mlflow.log_artifacts(model_dir, artifact_path="model")
+            # Log complete model pipeline to MLflow (uploads to GCS artifact root)
+            mlflow.log_artifacts(model_dir, artifact_path="model")
 
         # Register model if training on baseline data
         if data_source == "baseline":
@@ -234,24 +234,23 @@ def train_nn(X, y, env, test_mode):
 
         print(f"🎯 NN – RMSE : {rmse:.2f} | R² : {r2:.4f} | Params: {total_params}")
 
-        # Save model locally first
-        if env == "prod":
-            model_dir = os.path.join("tmp_nn_model", "nn")
-        else:
-            model_dir = os.path.join("models", "nn_prod")
+        # Save model to temporary directory for MLflow upload
+        import tempfile
 
-        os.makedirs(model_dir, exist_ok=True)
-        nn.save(model_dir)
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            model_dir = os.path.join(tmp_dir, "model")
+            os.makedirs(model_dir, exist_ok=True)
+            nn.save(model_dir)
 
-        # Log complete model pipeline to MLflow (uploads to GCS artifact root)
-        mlflow.log_artifacts(model_dir, artifact_path="model")
+            # Log complete model pipeline to MLflow (uploads to GCS artifact root)
+            mlflow.log_artifacts(model_dir, artifact_path="model")
 
         # Register model if not in test mode
         if not test_mode:
             model_uri = f"runs:/{run.info.run_id}/model"
             mlflow.register_model(model_uri, "bike-traffic-nn")
 
-        # Update summary.json in GCS (PROD only)
+        # Update summary.json in GCS
         update_model_summary(
             model_type="nn",
             run_id=run.info.run_id,
@@ -261,13 +260,7 @@ def train_nn(X, y, env, test_mode):
             test_mode=test_mode,
         )
 
-        # Clean up temp directory in PROD
-        if env == "prod":
-            if os.path.exists("tmp_nn_model"):
-                shutil.rmtree("tmp_nn_model")
-                print("🧹 Dossier temporaire supprimé : tmp_nn_model")
-
-        print(f"✅ Modèle NN logged to MLflow + sauvegardé dans : {model_dir}")
+        print("✅ Modèle NN logged to MLflow (artifacts uploaded to GCS)")
 
     return {"rmse": rmse, "r2": r2}
 

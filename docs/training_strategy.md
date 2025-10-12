@@ -72,8 +72,9 @@ python backend/regmodel/app/train.py \
   - `reference` — Legacy reference_data.csv
   - `current` — Current production data snapshot
 - `--env`: Environment mode
-  - `dev` — Local development (default, saves to `models/rf_prod/`)
-  - `prod` — Production mode (saves to GCS `gs://bucket/models/`)
+  - `dev` — Local development (default)
+  - `prod` — Production mode
+  - **Note:** Both modes upload everything to GCS (artifacts + metadata via MLflow)
 - `--model-test`: Quick test mode (1000 rows sample for debugging)
 
 **Quick Test Training:**
@@ -95,10 +96,9 @@ python backend/regmodel/app/train.py \
 4. **Evaluation:** Computes metrics on training set (RMSE, R²)
 5. **MLflow Logging:**
    - Artifacts uploaded to `gs://df_traffic_cyclist1/mlflow-artifacts/{run_id}/`
+   - Metadata uploaded to `gs://df_traffic_cyclist1/mlflow-backend/` (experiments, runs, metrics)
    - Model registered in MLflow Registry (`bike-traffic-rf` version X)
-   - Metadata saved locally in `mlruns_dev/` (Docker volume)
-6. **Summary Update:** `gs://bucket/models/summary.json` updated with run info
-7. **Local Backup:** Model saved to `models/rf_prod/` (DEV only)
+6. **Summary Update:** `gs://bucket/models/summary.json` updated with run info for Airflow
 
 #### 1.4 Expected Metrics (Baseline Data)
 
@@ -223,19 +223,30 @@ The training system uses **MLflow** for experiment tracking and model registry:
 │  (train.py)      │        │  localhost:5000     │
 └──────────────────┘        └─────────────────────┘
          │                            │
-         │ Artifacts                  │ Metadata
+         │ Artifacts ✅               │ Metadata ⚠️
          ↓                            ↓
 ┌──────────────────┐        ┌─────────────────────┐
-│  GCS Bucket      │        │  Local Filesystem   │
+│  GCS Bucket      │        │  Local Volume       │
 │  mlflow-artifacts│        │  mlruns_dev/        │
 └──────────────────┘        └─────────────────────┘
+                                      │
+                            Future: Cloud SQL PostgreSQL
 ```
 
 **Key Components:**
 
-1. **Backend Store** (metadata): Local `mlruns_dev/` mapped to Docker
+1. **Backend Store** (metadata): Local `mlruns_dev/` Docker volume
+   - ⚠️ **Current Limitation**: MLflow doesn't support GCS as backend store
+   - Supported backends: File, PostgreSQL, MySQL, SQLite, MSSQL
+   - 🔮 **Future Migration**: Cloud SQL PostgreSQL for production (shared, persistent, scalable)
+   - Current: Acceptable for development, metadata can be reconstructed from artifacts
 2. **Artifact Store** (models): `gs://df_traffic_cyclist1/mlflow-artifacts/`
+   - ✅ All model files (joblib, weights) stored on GCS
+   - ✅ Accessible from anywhere with proper credentials
+   - ✅ This is the critical storage (models are the source of truth)
 3. **Model Registry**: MLflow UI + `summary.json` for Airflow
+   - MLflow UI: Rich versioning, lineage, comparison (metadata-driven)
+   - summary.json: Programmatic access for DAGs (artifact-driven, reliable)
 
 ### Authentication Requirements
 
@@ -259,6 +270,7 @@ import mlflow  # Now can upload to GCS
 # docker-compose.yaml
 mlflow:
   volumes:
+    - ./mlruns_dev:/mlflow/mlruns  # Local metadata volume
     - ./mlflow-ui-access.json:/mlflow/gcp.json:ro
   environment:
     - GOOGLE_APPLICATION_CREDENTIALS=/mlflow/gcp.json
@@ -267,6 +279,21 @@ mlflow:
     mlflow server --backend-store-uri file:///mlflow/mlruns
                   --default-artifact-root gs://bucket/mlflow-artifacts
                   --host 0.0.0.0 --port 5000"
+```
+
+**Production Migration Path:**
+
+For production, migrate backend store to Cloud SQL PostgreSQL:
+
+```bash
+# Create Cloud SQL instance
+gcloud sql instances create mlflow-db \
+    --database-version=POSTGRES_14 \
+    --tier=db-f1-micro \
+    --region=europe-west1
+
+# Update docker-compose.yaml
+--backend-store-uri postgresql://user:pass@host:5432/mlflow
 ```
 
 ### Model Registry (Dual System)
