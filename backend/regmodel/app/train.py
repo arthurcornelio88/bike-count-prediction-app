@@ -105,7 +105,7 @@ def log_and_export_model(
     print(f"🧹 Répertoire temporaire supprimé : {temp_model_path}")
 
 
-def train_rf(X, y, env, test_mode):
+def train_rf(X, y, env, test_mode, data_source="reference"):
     y = y.to_numpy()
     run_name = f"RandomForest_Train_{env}" + ("_TEST" if test_mode else "")
     print("📡 Tracking URI :", mlflow.get_tracking_uri())
@@ -114,6 +114,11 @@ def train_rf(X, y, env, test_mode):
         run = mlflow.active_run()
         mlflow.set_tag("mode", env)
         mlflow.set_tag("test_mode", test_mode)
+        mlflow.set_tag("dataset", "full" if data_source == "baseline" else "partial")
+        mlflow.set_tag(
+            "training_type", "champion" if data_source == "baseline" else "legacy"
+        )
+        mlflow.set_tag("data_source", data_source)
         mlflow.log_metric("test_mode", int(test_mode))
         mlflow.sklearn.autolog(disable=True)
 
@@ -312,7 +317,7 @@ def train_model(
 
     Args:
         model_type: "rf", "nn", or "rf_class"
-        data_source: "reference" or "current" (DVC data)
+        data_source: "reference", "current", or "baseline" (train_baseline.csv)
         env: "dev" or "prod"
         hyperparams: dict of hyperparameters (optional)
         test_mode: if True, use small sample (1000 rows) for fast testing
@@ -325,6 +330,10 @@ def train_model(
         # Use small test sample for fast training (avoid loading 1GB file)
         data_path = "data/test_sample.csv"
         print("⚡ TEST MODE: Using test sample (1000 rows)")
+    elif data_source == "baseline":
+        # NEW: Use train_baseline.csv for champion training (env-based path)
+        data_path = os.getenv("TRAIN_DATA_PATH", "data/train_baseline.csv")
+        print(f"🏆 CHAMPION TRAINING: Using baseline from {data_path}")
     elif data_source == "reference":
         data_path = "data/reference_data.csv"
     elif data_source == "current":
@@ -356,7 +365,7 @@ def train_model(
 
     if model_type == "rf":
         # TODO: Use hyperparams if provided
-        metrics = train_rf(X, y, env, test_mode)
+        metrics = train_rf(X, y, env, test_mode, data_source)
         return {
             "run_id": "rf_" + datetime.now().strftime("%Y%m%d_%H%M%S"),
             "metrics": metrics,
@@ -386,25 +395,68 @@ def train_model(
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Train bike count models (RF + NN)")
+    parser = argparse.ArgumentParser(description="Train bike count models")
     parser.add_argument(
-        "--model_test", action="store_true", help="Use 1000 samples for fast training"
+        "--model-type",
+        choices=["rf", "nn", "rf_class", "all"],
+        default="all",
+        help="Model type to train (default: all)",
+    )
+    parser.add_argument(
+        "--data-source",
+        choices=["reference", "current", "baseline"],
+        default="baseline",
+        help="Data source (default: baseline = train_baseline.csv)",
+    )
+    parser.add_argument(
+        "--model-test",
+        action="store_true",
+        help="Use 1000 samples for fast training",
     )
     parser.add_argument(
         "--env", default="dev", choices=["dev", "prod"], help="Choose 'dev' or 'prod'"
     )
     args = parser.parse_args()
 
-    data_path, artifact_path = setup_environment(args.env, args.model_test)
-    print(f"✅ Environnement {args.env} configuré. Données : {data_path}")
+    print("=" * 60)
+    print("🏆 MODEL TRAINING")
+    print("=" * 60)
+    print(f"Model type: {args.model_type}")
+    print(f"Data source: {args.data_source}")
+    print(f"Environment: {args.env}")
+    print(f"Test mode: {args.model_test}")
+    print("=" * 60)
+    print()
 
-    X, y = load_and_clean_data(data_path)
-    print(f"📊 Données chargées : {X.shape[0]} lignes")
+    # Train specific model or all models
+    if args.model_type == "all":
+        # Legacy behavior: train all models
+        data_path, artifact_path = setup_environment(args.env, args.model_test)
+        print(f"✅ Environnement {args.env} configuré. Données : {data_path}")
 
-    train_rf(X, y, args.env, args.model_test)
-    train_nn(X, y, args.env, args.model_test)
+        X, y = load_and_clean_data(data_path)
+        print(f"📊 Données chargées : {X.shape[0]} lignes")
 
-    df_raw = load_and_clean_data(data_path, preserve_target=True)
-    train_rfc(df_raw, None, args.env, args.model_test)
+        train_rf(X, y, args.env, args.model_test)
+        train_nn(X, y, args.env, args.model_test)
+
+        df_raw = load_and_clean_data(data_path, preserve_target=True)
+        train_rfc(df_raw, None, args.env, args.model_test)
+    else:
+        # NEW: Train single model with data_source support
+        result = train_model(
+            model_type=args.model_type,
+            data_source=args.data_source,
+            env=args.env,
+            test_mode=args.model_test,
+        )
+        print()
+        print("=" * 60)
+        print("✅ TRAINING COMPLETE")
+        print("=" * 60)
+        print(f"Run ID: {result['run_id']}")
+        print(f"Metrics: {result['metrics']}")
+        print(f"Model URI: {result['model_uri']}")
+        print("=" * 60)
 
     print(f"🏁 Entraînement terminé ({args.env})")
