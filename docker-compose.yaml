@@ -57,7 +57,7 @@ services:
       - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp.json
     volumes:
       - ./backend/regmodel/app:/app/app  # Mount only app code for hot reload
-      - ./gcp.json:/app/gcp.json:ro
+      - ./mlflow-trainer.json:/app/gcp.json:ro
       - ./data:/app/data:ro
     depends_on:
       - mlflow

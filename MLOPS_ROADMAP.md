@@ -90,8 +90,7 @@ pytest.ini                     ✅ Configuration
 **Deliverables** ✅:
 
 - ✅ `train_model()` function in [train.py:256](backend/regmodel/app/train.py#L256)
-- ✅ `/train` endpoint in [fastapi_app.py:101](backend/regmodel/app/fastapi_app.py#L101)
-- ✅ Docker Compose with RegModel API + MLflow server + Cloud SQL Proxy
+- ✅ Docker Compose MLflow server + Cloud SQL Proxy
 - ✅ **Cloud SQL PostgreSQL** backend (`mlflow-metadata` instance)
 - ✅ UV-optimized Dockerfile ([backend/regmodel/Dockerfile](backend/regmodel/Dockerfile))
 - ✅ Dedicated pyproject.toml for RegModel service
@@ -111,27 +110,6 @@ services:
     - Backend store: Cloud SQL PostgreSQL (metadata)
     - Artifact store: gs://df_traffic_cyclist1/mlflow-artifacts/
     - Benefits: Shared team tracking, persistent, scalable
-
-  regmodel-backend:
-    - FastAPI on port 8000
-    - Depends on MLflow
-    - Mounts: code, GCS credentials, data
-    - Hot reload enabled (dev mode)
-```
-
-**API Usage**:
-
-```bash
-# Train RF model on baseline data
-curl -X POST "http://localhost:8000/train" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model_type": "rf",
-    "data_source": "baseline",
-    "env": "prod"
-  }'
-
-# Response includes: run_id, metrics, model_uri
 ```
 
 **Supported models**:
@@ -150,21 +128,23 @@ curl -X POST "http://localhost:8000/train" \
 
 **Validation completed** ✅:
 
-- ✅ Full stack tested: `docker compose up` works
+- ✅ MLflow stack : `docker compose up` works
 - ✅ MLflow UI accessible at <http://localhost:5000>
 - ✅ Cloud SQL proxy connection verified (europe-west3)
 - ✅ Service account permissions configured (`roles/cloudsql.client`)
-- ✅ `/train` endpoint tested with RF, NN models
 - ✅ Test mode (`test_mode=true`) working with `test_sample.csv`
 - ✅ Metrics correctly returned in API response (RMSE, R²)
 - ✅ MLflow tracking confirmed (runs, metrics, tags, artifacts to GCS)
 
-#### **2.4 Quick smoke tests for `/train` (model-test)**
+#### **2.4 Test `/train`**
 
-Before deploying Airflow, run quick smoke tests against the `/train` endpoint using
-`test_mode=true` so training is fast and safe. Put these checks in CI or run locally.
+Now that training locally with `python script/train.py` is working, before deploying
+Airflow, run tests against the `/train` endpoint using `test_mode=true` so training is
+fast and safe. Put these checks in CI or run locally.
 
-1) Quick curl smoke test (RF):
+1) Test (RF, NN):
+
+- 🔄 `/train` endpoint tested with RF, NN models
 
 ```bash
 curl -s -X POST "http://localhost:8000/train" \
