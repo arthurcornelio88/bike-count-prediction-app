@@ -223,23 +223,23 @@ The training system uses **MLflow** for experiment tracking and model registry:
 │  (train.py)      │        │  localhost:5000     │
 └──────────────────┘        └─────────────────────┘
          │                            │
-         │ Artifacts ✅               │ Metadata ⚠️
+         │ Artifacts ✅               │ Metadata ✅
          ↓                            ↓
 ┌──────────────────┐        ┌─────────────────────┐
-│  GCS Bucket      │        │  Local Volume       │
-│  mlflow-artifacts│        │  mlruns_dev/        │
+│  GCS Bucket      │        │  Cloud SQL          │
+│  mlflow-artifacts│        │  PostgreSQL         │
 └──────────────────┘        └─────────────────────┘
                                       │
-                            Future: Cloud SQL PostgreSQL
+                            datascientest-460618:europe-west3:mlflow-metadata
 ```
 
 **Key Components:**
 
-1. **Backend Store** (metadata): Local `mlruns_dev/` Docker volume
-   - ⚠️ **Current Limitation**: MLflow doesn't support GCS as backend store
-   - Supported backends: File, PostgreSQL, MySQL, SQLite, MSSQL
-   - 🔮 **Future Migration**: Cloud SQL PostgreSQL for production (shared, persistent, scalable)
-   - Current: Acceptable for development, metadata can be reconstructed from artifacts
+1. **Backend Store** (metadata): ✅ **Cloud SQL PostgreSQL**
+   - Instance: `mlflow-metadata` (europe-west3)
+   - Database: `mlflow` (user: `mlflow_user`)
+   - Connection: Via Cloud SQL Proxy in docker-compose
+   - Benefits: Shared, persistent, scalable metadata storage
 2. **Artifact Store** (models): `gs://df_traffic_cyclist1/mlflow-artifacts/`
    - ✅ All model files (joblib, weights) stored on GCS
    - ✅ Accessible from anywhere with proper credentials
@@ -264,36 +264,44 @@ if os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") is None:
 import mlflow  # Now can upload to GCS
 ```
 
-**For MLflow Server (Docker):**
+**For MLflow Server (Docker with Cloud SQL):**
 
 ```yaml
 # docker-compose.yaml
+cloud-sql-proxy:
+  image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:latest
+  command:
+    - "--address=0.0.0.0"
+    - "--port=5432"
+    - "--health-check"
+    - "${MLFLOW_INSTANCE_CONNECTION}"
+  volumes:
+    - ./gcp.json:/config:ro
+  environment:
+    - GOOGLE_APPLICATION_CREDENTIALS=/config
+
 mlflow:
   volumes:
-    - ./mlruns_dev:/mlflow/mlruns  # Local metadata volume
     - ./mlflow-ui-access.json:/mlflow/gcp.json:ro
   environment:
     - GOOGLE_APPLICATION_CREDENTIALS=/mlflow/gcp.json
+    - MLFLOW_BACKEND_STORE_URI=postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@cloud-sql-proxy:5432/${MLFLOW_DB_NAME}
+  depends_on:
+    - cloud-sql-proxy
   entrypoint: >
-    /bin/bash -c "pip install google-cloud-storage &&
-    mlflow server --backend-store-uri file:///mlflow/mlruns
-                  --default-artifact-root gs://bucket/mlflow-artifacts
+    /bin/bash -c "sleep 10 && pip install google-cloud-storage psycopg2-binary &&
+    mlflow server --backend-store-uri $$MLFLOW_BACKEND_STORE_URI
+                  --default-artifact-root gs://df_traffic_cyclist1/mlflow-artifacts
                   --host 0.0.0.0 --port 5000"
 ```
 
-**Production Migration Path:**
-
-For production, migrate backend store to Cloud SQL PostgreSQL:
+**Cloud SQL Setup:**
 
 ```bash
-# Create Cloud SQL instance
-gcloud sql instances create mlflow-db \
-    --database-version=POSTGRES_14 \
-    --tier=db-f1-micro \
-    --region=europe-west1
-
-# Update docker-compose.yaml
---backend-store-uri postgresql://user:pass@host:5432/mlflow
+# Already completed via scripts/setup_mlflow_db.sh
+# Instance: mlflow-metadata (europe-west3)
+# Database: mlflow, User: mlflow_user
+# Password stored in Secret Manager: mlflow-db-password
 ```
 
 ### Model Registry (Dual System)
