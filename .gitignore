@@ -36,6 +36,7 @@ models/
 
 # gcredentials
 gcp.json
+gcp-production.json
 backend/cloud_run/gcp.json
 backend/render/gcp.json
 backend/cloud_run/.env
@@ -43,6 +44,14 @@ backend/render/.env
 secrets.toml
 mlflow-trainer.json
 mlflow-ui-access.json
+
+# Environment files with secrets
+.env
+.env.local
+.env.production
+.env.*.local
+!.env.production.template
+!.env.airflow
 
 # streamlit cloud
 .devcontainer/
