@@ -30,14 +30,16 @@ services:
       - ./mlflow-ui-access.json:/mlflow/gcp.json:ro  # Service account with bucket read/write access
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/mlflow/gcp.json
-      - MLFLOW_BACKEND_STORE_URI=postgresql://${MLFLOW_DB_USER}:${MLFLOW_DB_PASSWORD}@cloud-sql-proxy:5432/${MLFLOW_DB_NAME}
+      - MLFLOW_DB_USER=${MLFLOW_DB_USER}
+      - MLFLOW_DB_PASSWORD=${MLFLOW_DB_PASSWORD}
+      - MLFLOW_DB_NAME=${MLFLOW_DB_NAME}
     env_file:
       - .env
     depends_on:
       - cloud-sql-proxy
     # Install dependencies and start MLflow with Cloud SQL backend
     # Wait for proxy to be ready before starting MLflow
-    entrypoint: /bin/bash -c "pip install google-cloud-storage psycopg2-binary && echo 'Waiting for Cloud SQL proxy...' && python -c \"import socket, time, sys; [(sys.exit(0) if socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect_ex(('cloud-sql-proxy', 5432)) == 0 else time.sleep(2)) for _ in range(30)]\" && mlflow server --backend-store-uri $$MLFLOW_BACKEND_STORE_URI --default-artifact-root gs://df_traffic_cyclist1/mlflow-artifacts --host 0.0.0.0 --port 5000"
+    entrypoint: /bin/bash -c "pip install google-cloud-storage psycopg2-binary && echo 'Waiting for Cloud SQL proxy...' && python -c \"import socket, time, sys; [(sys.exit(0) if socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect_ex(('cloud-sql-proxy', 5432)) == 0 else time.sleep(2)) for _ in range(30)]\" && python -c \"import urllib.parse, os; print('postgresql://' + os.environ['MLFLOW_DB_USER'] + ':' + urllib.parse.quote_plus(os.environ['MLFLOW_DB_PASSWORD']) + '@cloud-sql-proxy:5432/' + os.environ['MLFLOW_DB_NAME'])\" > /tmp/db_uri && mlflow server --backend-store-uri $$(cat /tmp/db_uri) --default-artifact-root gs://df_traffic_cyclist1/mlflow-artifacts --host 0.0.0.0 --port 5000"
     restart: unless-stopped
 
   # ========================================
