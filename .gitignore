@@ -63,5 +63,6 @@ summary.json
 # dags
 ref_dags/
 
-# Airflow logs
+# Airflow logs and shared data (dev only, prod uses GCS)
 logs/
+shared_data/

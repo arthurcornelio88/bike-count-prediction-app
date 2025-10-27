@@ -121,6 +121,8 @@ services:
       - ./plugins:/opt/airflow/plugins
       - ./gcp.json:/opt/airflow/gcp.json:ro
       - ./data:/opt/airflow/data:ro
+      - ./shared_data:/app/shared_data  # Shared data between DAGs (dev only, prod uses GCS)
+      - ./models:/app/models  # Model artifacts (dev only, prod uses GCS)
     user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-50000}"
     depends_on:
       redis-airflow:

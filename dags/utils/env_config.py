@@ -105,11 +105,8 @@ class EnvironmentConfig:
         os.environ["API_URL"] = os.getenv("API_URL_DEV", "http://regmodel-backend:8000")
         os.environ["API_KEY_SECRET"] = os.getenv("API_KEY_SECRET", "dev-key-unsafe")
 
-        # Créer les répertoires nécessaires
-        import pathlib
-
-        pathlib.Path("/app/shared_data").mkdir(parents=True, exist_ok=True)
-        pathlib.Path("/app/models").mkdir(parents=True, exist_ok=True)
+        # Note: Directories are created via Docker volumes mount
+        # See docker-compose.yaml volumes section
 
     def _set_default_if_missing(self, env_var: str, default_value: str):
         """Définit une valeur par défaut si la variable n'existe pas"""

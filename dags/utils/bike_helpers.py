@@ -199,12 +199,21 @@ def create_bq_dataset_if_not_exists(
     try:
         client.get_dataset(dataset_ref)
         print(f"✅ Dataset exists: {dataset_ref}")
-    except Exception:
-        print(f"⚠️ Dataset not found. Creating: {dataset_ref}")
-        dataset = bigquery.Dataset(dataset_ref)
-        dataset.location = location
-        client.create_dataset(dataset)
-        print(f"✅ Dataset created: {dataset_ref}")
+    except Exception as e:
+        if "Not found" in str(e) or "404" in str(e):
+            print(f"⚠️ Dataset not found. Creating: {dataset_ref}")
+            dataset = bigquery.Dataset(dataset_ref)
+            dataset.location = location
+            try:
+                client.create_dataset(dataset, exists_ok=True)
+                print(f"✅ Dataset created: {dataset_ref}")
+            except Exception as create_error:
+                if "Already Exists" in str(create_error):
+                    print(f"✅ Dataset already exists (race condition): {dataset_ref}")
+                else:
+                    raise
+        else:
+            raise
 
 
 def create_monitoring_table_if_needed(
@@ -230,12 +239,23 @@ def create_monitoring_table_if_needed(
     try:
         client.get_dataset(full_dataset_id)
         print(f"✅ Dataset exists: {full_dataset_id}")
-    except Exception:
-        print(f"⚠️ Dataset not found. Creating: {full_dataset_id}")
-        dataset = bigquery.Dataset(full_dataset_id)
-        dataset.location = location
-        client.create_dataset(dataset)
-        print(f"✅ Dataset created: {full_dataset_id}")
+    except Exception as e:
+        if "Not found" in str(e) or "404" in str(e):
+            print(f"⚠️ Dataset not found. Creating: {full_dataset_id}")
+            dataset = bigquery.Dataset(full_dataset_id)
+            dataset.location = location
+            try:
+                client.create_dataset(dataset, exists_ok=True)
+                print(f"✅ Dataset created: {full_dataset_id}")
+            except Exception as create_error:
+                if "Already Exists" in str(create_error):
+                    print(
+                        f"✅ Dataset already exists (race condition): {full_dataset_id}"
+                    )
+                else:
+                    raise
+        else:
+            raise
 
     # Vérifie si la table existe
     try:
