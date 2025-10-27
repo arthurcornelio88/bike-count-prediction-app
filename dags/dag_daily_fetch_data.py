@@ -120,6 +120,17 @@ def fetch_bike_data_to_bq(**context):
         if old_name in df.columns and old_name != new_name:
             df.rename(columns={old_name: new_name}, inplace=True)
 
+    # Convert coordinates dict to separate lat/lon columns
+    if "coordonnees_geographiques" in df.columns:
+        df["latitude"] = df["coordonnees_geographiques"].apply(
+            lambda x: x.get("lat") if isinstance(x, dict) else None
+        )
+        df["longitude"] = df["coordonnees_geographiques"].apply(
+            lambda x: x.get("lon") if isinstance(x, dict) else None
+        )
+        # Drop the original dict column
+        df = df.drop(columns=["coordonnees_geographiques"])
+
     # Add ingestion timestamp
     df["ingestion_ts"] = datetime.utcnow()
 
@@ -129,7 +140,8 @@ def fetch_bike_data_to_bq(**context):
         "date_et_heure_de_comptage",
         "identifiant_du_compteur",
         "nom_du_compteur",
-        "coordonnees_geographiques",
+        "latitude",
+        "longitude",
         "ingestion_ts",
     ]
 
