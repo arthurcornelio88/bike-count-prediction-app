@@ -11,6 +11,7 @@ import requests
 import pandas as pd
 from google.cloud import bigquery
 import numpy as np
+import os
 
 from utils.env_config import get_env_config
 from utils.bike_helpers import (
@@ -21,11 +22,12 @@ from utils.bike_helpers import (
 
 # Configuration
 ENV_CONFIG = get_env_config()
+IS_DEV = os.getenv("ENV", "DEV") == "DEV"
 
 default_args = {
     "owner": "mlops-team",
     "retries": 1,
-    "retry_delay": timedelta(minutes=10),
+    "retry_delay": timedelta(seconds=30) if IS_DEV else timedelta(minutes=10),
     "start_date": datetime(2024, 10, 1),
 }
 

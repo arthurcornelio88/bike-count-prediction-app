@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 import requests
 import pandas as pd
 from google.cloud import bigquery
+import os
 
 from utils.env_config import get_env_config
 from utils.bike_helpers import create_bq_dataset_if_not_exists
@@ -16,11 +17,12 @@ from utils.bike_helpers import create_bq_dataset_if_not_exists
 
 # Configuration
 ENV_CONFIG = get_env_config()
+IS_DEV = os.getenv("ENV", "DEV") == "DEV"
 
 default_args = {
     "owner": "mlops-team",
-    "retries": 2,
-    "retry_delay": timedelta(minutes=5),
+    "retries": 1 if IS_DEV else 2,
+    "retry_delay": timedelta(seconds=30) if IS_DEV else timedelta(minutes=5),
     "start_date": datetime(2024, 10, 1),
 }
 
