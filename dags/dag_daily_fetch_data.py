@@ -48,35 +48,58 @@ def fetch_bike_data_to_bq(**context):
     # Paris Open Data API (comptage vélo - données compteurs)
     api_url = "https://opendata.paris.fr/api/explore/v2.1/catalog/datasets/comptage-velo-donnees-compteurs/records"
 
-    # Parameters: fetch last 1000 records, sorted by date descending
-    params = {
-        "limit": 1000,
-        "order_by": "date_et_heure_de_comptage DESC",
-        "timezone": "Europe/Paris",
-    }
+    # Parameters: API limit is 100 per request, so we'll paginate
+    # Fetch up to 1000 records total (10 pages of 100)
+    max_records = 1000
+    page_size = 100
+    offset = 0
+    all_records = []
 
-    print(f"🌐 Calling API: {api_url}")
-    response = requests.get(api_url, params=params, timeout=30)
+    print(f"🌐 Fetching data from API (pagination with limit={page_size})")
 
-    if response.status_code != 200:
-        raise Exception(
-            f"❌ API request failed: {response.status_code} - {response.text}"
-        )
+    while len(all_records) < max_records:
+        params = {
+            "limit": page_size,
+            "offset": offset,
+            "order_by": "date_et_heure_de_comptage DESC",
+            "timezone": "Europe/Paris",
+        }
 
-    data = response.json()
+        print(f"  📄 Page {offset // page_size + 1}: offset={offset}")
+        response = requests.get(api_url, params=params, timeout=30)
 
-    if "results" not in data or len(data["results"]) == 0:
+        if response.status_code != 200:
+            raise Exception(
+                f"❌ API request failed: {response.status_code} - {response.text}"
+            )
+
+        data = response.json()
+
+        if "results" not in data or len(data["results"]) == 0:
+            print(f"  ✅ No more data at offset {offset}, stopping pagination")
+            break
+
+        # Extract records from API response
+        for record in data["results"]:
+            # Paris Open Data v2 API structure: each record has 'fields' with the data
+            if "fields" in record:
+                all_records.append(record["fields"])
+            else:
+                # If no 'fields', use the record directly
+                all_records.append(record)
+
+        # If we got less than page_size records, we've reached the end
+        if len(data["results"]) < page_size:
+            print(f"  ✅ Last page reached (got {len(data['results'])} records)")
+            break
+
+        offset += page_size
+
+    if len(all_records) == 0:
         raise Exception("❌ No data returned from API")
 
-    # Extract records from API response
-    records = []
-    for record in data["results"]:
-        # Paris Open Data v2 API structure: each record has 'fields' with the data
-        if "fields" in record:
-            records.append(record["fields"])
-        else:
-            # If no 'fields', use the record directly
-            records.append(record)
+    print(f"✅ Total records fetched: {len(all_records)}")
+    records = all_records
 
     df = pd.DataFrame(records)
 
