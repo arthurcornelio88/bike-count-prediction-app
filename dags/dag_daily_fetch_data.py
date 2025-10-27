@@ -205,29 +205,29 @@ def fetch_bike_data_to_bq(**context):
 def validate_ingestion(**context):
     """
     Validate that data was successfully ingested into BigQuery
-    Validates only today's partition
+    Validates records ingested in the last 5 minutes (this DAG run)
     """
-    today_date = datetime.utcnow().strftime("%Y-%m-%d")
-
     # Pull metadata from previous task
     table_id = context["ti"].xcom_pull(task_ids="fetch_to_bigquery", key="table_id")
     records_count = context["ti"].xcom_pull(
         task_ids="fetch_to_bigquery", key="records_count"
     )
 
-    print(f"🔍 Validating ingestion for {table_id} (date: {today_date})")
+    print(f"🔍 Validating ingestion for {table_id}")
     print(f"📊 Expected records: {records_count}")
 
-    # Query BigQuery to verify today's partition only
+    # Query BigQuery to verify recently ingested records (last 5 minutes)
     client = bigquery.Client(project=ENV_CONFIG["BQ_PROJECT"])
 
     query = f"""
     SELECT
         COUNT(*) as total_records,
         MIN(ingestion_ts) as first_ingestion,
-        MAX(ingestion_ts) as last_ingestion
+        MAX(ingestion_ts) as last_ingestion,
+        MIN(DATE(date_et_heure_de_comptage)) as min_data_date,
+        MAX(DATE(date_et_heure_de_comptage)) as max_data_date
     FROM `{table_id}`
-    WHERE DATE(date_et_heure_de_comptage) = '{today_date}'
+    WHERE ingestion_ts >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 5 MINUTE)
     """  # nosec B608
 
     df = client.query(query).to_dataframe()
@@ -235,16 +235,19 @@ def validate_ingestion(**context):
     actual_count = df["total_records"].iloc[0]
     first_ingestion = df["first_ingestion"].iloc[0]
     last_ingestion = df["last_ingestion"].iloc[0]
+    min_data_date = df["min_data_date"].iloc[0]
+    max_data_date = df["max_data_date"].iloc[0]
 
     print("✅ Validation results:")
-    print(f"   - Actual records in BQ for {today_date}: {actual_count}")
+    print(f"   - Records ingested in last 5 min: {actual_count}")
     print(f"   - First ingestion: {first_ingestion}")
     print(f"   - Last ingestion: {last_ingestion}")
+    print(f"   - Data date range: {min_data_date} to {max_data_date}")
 
-    # Basic validation - allow some variance due to potential duplicates or API changes
+    # Basic validation
     if actual_count == 0:
         raise Exception(
-            f"❌ Validation failed: No records for {today_date} in BigQuery table"
+            "❌ Validation failed: No records ingested in the last 5 minutes"
         )
 
     if actual_count < records_count * 0.9:
@@ -253,7 +256,7 @@ def validate_ingestion(**context):
             f"(expected {records_count}, got {actual_count})"
         )
 
-    print(f"✅ Validation passed for {table_id} (partition: {today_date})")
+    print(f"✅ Validation passed: {actual_count} records successfully ingested")
 
 
 # === DAG DEFINITION ===
