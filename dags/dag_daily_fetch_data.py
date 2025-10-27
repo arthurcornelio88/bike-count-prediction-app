@@ -131,6 +131,12 @@ def fetch_bike_data_to_bq(**context):
         # Drop the original dict column
         df = df.drop(columns=["coordonnees_geographiques"])
 
+    # Convert date string to TIMESTAMP for BigQuery partitioning
+    if "date_et_heure_de_comptage" in df.columns:
+        df["date_et_heure_de_comptage"] = pd.to_datetime(
+            df["date_et_heure_de_comptage"], errors="coerce"
+        )
+
     # Add ingestion timestamp
     df["ingestion_ts"] = datetime.utcnow()
 
