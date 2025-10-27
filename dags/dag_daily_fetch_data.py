@@ -61,7 +61,7 @@ def fetch_bike_data_to_bq(**context):
         params = {
             "limit": page_size,
             "offset": offset,
-            "order_by": "date_et_heure_de_comptage DESC",
+            "order_by": "date DESC",
             "timezone": "Europe/Paris",
         }
 
@@ -106,16 +106,13 @@ def fetch_bike_data_to_bq(**context):
     print(f"📊 Raw API response: {len(df)} records")
     print(f"📊 Columns: {df.columns.tolist()}")
 
-    # Standardize column names (API may return different formats)
-    # Common columns: comptage_horaire, date_et_heure_de_comptage, identifiant_du_compteur, etc.
+    # Standardize column names (API returns: date, sum_counts, id_compteur, nom_compteur, coordinates)
     column_mapping = {
-        "comptage_horaire": "comptage_horaire",
-        "date_et_heure_de_comptage": "date_et_heure_de_comptage",
-        "identifiant_du_compteur": "identifiant_du_compteur",
-        "nom_du_compteur": "nom_du_compteur",
-        "coordonnees_geographiques": "coordonnees_geographiques",
-        "id_compteur": "identifiant_du_compteur",  # Alternative name
-        "sum_counts": "comptage_horaire",  # Alternative name
+        "sum_counts": "comptage_horaire",
+        "date": "date_et_heure_de_comptage",
+        "id_compteur": "identifiant_du_compteur",
+        "nom_compteur": "nom_du_compteur",
+        "coordinates": "coordonnees_geographiques",
     }
 
     # Rename columns if they exist
