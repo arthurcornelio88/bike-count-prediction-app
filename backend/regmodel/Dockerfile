@@ -1,4 +1,5 @@
 # ===== Builder stage with UV =====
+# Multi-platform compatible: supports both linux/amd64 and linux/arm64
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS builder
 
 WORKDIR /app

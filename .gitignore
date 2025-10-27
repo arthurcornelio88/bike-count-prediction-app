@@ -62,3 +62,6 @@ summary.json
 
 # dags
 ref_dags/
+
+# Airflow logs
+logs/

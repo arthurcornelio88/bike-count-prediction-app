@@ -4,7 +4,7 @@ services:
   # ========================================
   cloud-sql-proxy:
     image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:latest
-    platform: linux/arm64
+    # platform: auto-detected based on host architecture
     container_name: cloud-sql-proxy
     command:
       - "--address=0.0.0.0"
@@ -24,7 +24,7 @@ services:
   # ========================================
   mlflow:
     image: ghcr.io/mlflow/mlflow:v2.22.0
-    platform: linux/arm64
+    # platform: auto-detected based on host architecture
     container_name: mlflow-server
     ports:
       - "5000:5000"
@@ -51,9 +51,7 @@ services:
     build:
       context: backend/regmodel
       dockerfile: Dockerfile
-      platforms:
-        - linux/amd64  # ⬅️ Forcer AMD64 (émulation)
-    platform: linux/amd64    # ⬅️ Forcer AMD64
+      # platform: auto-detected based on host architecture (works for both arm64 and amd64)
     container_name: regmodel-api
     ports:
       - "8000:8000"
