@@ -370,14 +370,16 @@ datascientest-460618:
 
 ```mermaid
 graph LR
-    A[dag_daily_fetch_data ✅] -->|@daily| B[BigQuery raw]
-    C[dag_daily_prediction ⏳] -->|@daily| D[BigQuery predictions]
-    E[dag_monitor_and_train ⏳] -->|@weekly| F{Drift?}
+    A[dag_daily_fetch_data] -->|daily| B[BigQuery Raw]
+    C[dag_daily_prediction] -->|daily| D[BigQuery Predictions]
+    E[dag_monitor_and_train] -->|weekly| F{Drift?}
     F -->|Yes| G[Evaluate Model]
-    G -->|Poor R²| H[Fine-tune via /train]
-    G -->|Good R²| I[End]
-    H --> J[Update BigQuery audit]
+    G -->|Poor| H[Fine-tune Model]
+    G -->|Good| I[End]
+    H --> J[Update Audit Logs]
 ```
+
+**Status**: DAG 1 ✅ Complete | DAG 2 ⏳ Next | DAG 3 ⏳ Pending
 
 **📁 Structure des fichiers** :
 
