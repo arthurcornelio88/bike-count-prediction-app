@@ -136,63 +136,47 @@ services:
 - ✅ Metrics correctly returned in API response (RMSE, R²)
 - ✅ MLflow tracking confirmed (runs, metrics, tags, artifacts to GCS)
 
-#### **2.4 Test `/train`**
+#### **2.4 Test `/train` Endpoint** ✅
 
-Now that training locally with `python script/train.py` is working, before deploying
-Airflow, run tests against the `/train` endpoint using `test_mode=true` so training is
-fast and safe. Put these checks in CI or run locally.
+**Status**: ✅ Complete - Endpoint tested and working in docker-compose stack
 
-1) Test (RF, NN):
-
-- 🔄 `/train` endpoint tested with RF, NN models
+**Quick Test:**
 
 ```bash
-curl -s -X POST "http://localhost:8000/train" \
+# Test with docker-compose stack
+docker compose up -d
+curl -X POST "http://localhost:8000/train" \
   -H "Content-Type: application/json" \
-  -d '{"model_type":"rf","data_source":"baseline","test_mode":true,"env":"dev"}' \
-  | jq
+  -d '{"model_type":"rf","data_source":"baseline","test_mode":true,"env":"dev"}'
 ```
 
-- Expected: JSON response with `run_id`, `metrics` (rmse, r2) and `model_uri`.
-- Artifacts should be small (uses `test_sample.csv`) and `summary.json` should be appended.
+**Expected Response**: JSON with `run_id`, `metrics` (rmse, r2), and `model_uri`
 
-2) Python example (programmatic check & retry):
+**Verification Checklist:**
 
-```python
-import requests
-resp = requests.post(
-    "http://localhost:8000/train",
-    json={"model_type":"nn","data_source":"baseline","test_mode":True,"env":"dev"},
-    timeout=600,
-)
-resp.raise_for_status()
-payload = resp.json()
-assert "run_id" in payload
-assert "metrics" in payload and "rmse" in payload["metrics"]
-print("Smoke test OK:", payload["run_id"], payload["metrics"])
-```
+- ✅ `/train` endpoint working in docker-compose stack
+- ✅ MLflow tracking to Cloud SQL backend
+- ✅ Artifacts stored in GCS (`gs://df_traffic_cyclist1/mlflow-artifacts/`)
+- ✅ `summary.json` appended to GCS
+- ✅ Test mode (`test_mode=true`) working with fast training
 
-3) Quick checks after training:
-
-- Check MLflow UI (<http://localhost:5000>) for the new run.
-- Confirm small artifacts in GCS under `mlflow-artifacts` (test run folder).
-- Confirm `summary.json` appended in `gs://df_traffic_cyclist1/models/summary.json`.
-
-These quick tests let you validate the entire stack (API → MLflow → GCS → summary.json)
-in a few minutes before wiring the `/train` call into Airflow.
+**Ready for**: Airflow DAG 3 (`dag_monitor_and_train.py`) integration
 
 ---
 
 ### **Phase 3 : Orchestration Airflow + Monitoring Production** (`feat/mlops-airflow-pipeline`)
 
-**Status**: 🔄 In Progress
+**Status**: 🔄 In Progress (DAG 1/3 Complete ✅)
 
 **Progress Summary:**
 
 - ✅ MLflow Cloud SQL backend configured (team collaboration enabled)
-- ✅ DAG files implemented (3/3): `dag_daily_fetch_data.py`, `dag_daily_prediction.py`, `dag_monitor_and_train.py`
-- 🔄 **Next step:** Deploy Airflow stack via docker-compose
-- ⏳ BigQuery datasets creation pending
+- ✅ Airflow stack deployed via docker-compose (WSL2 + Mac multi-platform support)
+- ✅ **DAG 1/3 COMPLETE**: `dag_daily_fetch_data.py` - Fully tested and documented
+- 🔄 **DAG 2/3 IN PROGRESS**: `dag_daily_prediction.py` - Next priority
+- ⏳ **DAG 3/3 PENDING**: `dag_monitor_and_train.py`
+- ✅ BigQuery dataset created (`bike_traffic_raw`)
+- ✅ BigQuery partitioned table architecture implemented (`comptage_velo`)
 - ⏳ Prometheus + Grafana monitoring pending
 
 **Objectifs unifiés** :
@@ -312,47 +296,52 @@ git commit -m "chore: add new baseline from current_api_data"
 
 ---
 
-#### **3.2 Architecture BigQuery**
+#### **3.2 Architecture BigQuery** ✅
 
 **3 Datasets pour traçabilité complète** :
 
 ```yaml
 # Structure BigQuery
 datascientest-460618:
-  bike_traffic_raw:           # Données brutes quotidiennes
-    - daily_YYYYMMDD          # Tables par jour (comptage horaire)
+  bike_traffic_raw:           # ✅ Données brutes (IMPLEMENTED)
+    - comptage_velo           # ✅ Table unique partitionnée par date
 
-  bike_traffic_predictions:   # Prédictions quotidiennes
+  bike_traffic_predictions:   # ⏳ Prédictions quotidiennes (PENDING)
     - daily_YYYYMMDD          # Prédictions + scores de confiance
     - prediction_ts           # Timestamp de prédiction
 
-  monitoring_audit:           # Logs de monitoring et réentraînement
+  monitoring_audit:           # ⏳ Logs de monitoring (PENDING)
     - logs                    # Audit complet (drift, AUC, fine-tuning)
 ```
 
 **Schema des tables** :
 
 ```python
-# bike_traffic_raw.daily_YYYYMMDD
+# ✅ bike_traffic_raw.comptage_velo (IMPLEMENTED)
+# Single partitioned table (NOT daily tables)
 {
-    "Comptage horaire": INTEGER,
-    "Date et heure de comptage": TIMESTAMP,
-    "Identifiant du compteur": STRING,
-    "Nom du compteur": STRING,
-    "Coordonnées géographiques": STRING,
-    "ingestion_ts": TIMESTAMP
+    "comptage_horaire": INTEGER,               # Hourly bike count
+    "date_et_heure_de_comptage": TIMESTAMP,    # Date/time (PARTITION FIELD)
+    "identifiant_du_compteur": STRING,         # Counter ID (CLUSTERING FIELD)
+    "nom_du_compteur": STRING,                 # Counter name
+    "latitude": FLOAT,                         # GPS latitude (extracted from coordinates)
+    "longitude": FLOAT,                        # GPS longitude (extracted from coordinates)
+    "ingestion_ts": TIMESTAMP                  # When record was ingested
 }
+# Partitioning: Daily partitions on date_et_heure_de_comptage
+# Clustering: By identifiant_du_compteur for efficient queries
+# Write mode: APPEND with deduplication logic
 
-# bike_traffic_predictions.daily_YYYYMMDD
+# ⏳ bike_traffic_predictions.daily_YYYYMMDD (PENDING - DAG 2)
 {
-    "Comptage horaire": INTEGER,          # Valeur réelle (si disponible)
+    "comptage_horaire": INTEGER,          # Valeur réelle (si disponible)
     "prediction": FLOAT,                   # Prédiction du modèle
     "model_type": STRING,                  # rf, nn, rf_class
     "model_version": STRING,               # Timestamp du modèle
     "prediction_ts": TIMESTAMP
 }
 
-# monitoring_audit.logs
+# ⏳ monitoring_audit.logs (PENDING - DAG 3)
 {
     "timestamp": TIMESTAMP,
     "drift_detected": BOOLEAN,
@@ -366,6 +355,13 @@ datascientest-460618:
 }
 ```
 
+**Key Architecture Decisions:**
+
+- **Single partitioned table** instead of daily tables (better for queries, easier maintenance)
+- **Deduplication logic** prevents duplicate insertions on DAG reruns
+- **Clustering by counter ID** optimizes queries filtering by specific counters
+- **Idempotent design** allows safe reruns without data duplication
+
 ---
 
 #### **3.2 DAGs Airflow (Architecture modulaire)**
@@ -374,9 +370,9 @@ datascientest-460618:
 
 ```mermaid
 graph LR
-    A[dag_daily_fetch_data] -->|@daily| B[BigQuery raw]
-    C[dag_daily_prediction] -->|@daily| D[BigQuery predictions]
-    E[dag_monitor_and_train] -->|@weekly| F{Drift?}
+    A[dag_daily_fetch_data ✅] -->|@daily| B[BigQuery raw]
+    C[dag_daily_prediction ⏳] -->|@daily| D[BigQuery predictions]
+    E[dag_monitor_and_train ⏳] -->|@weekly| F{Drift?}
     F -->|Yes| G[Evaluate Model]
     G -->|Poor R²| H[Fine-tune via /train]
     G -->|Good R²| I[End]
@@ -387,467 +383,162 @@ graph LR
 
 ```text
 dags/
-├── dag_daily_fetch_data.py          # Ingestion données brutes → BigQuery
-├── dag_daily_prediction.py          # Prédictions via /predict → BigQuery
-├── dag_monitor_and_train.py         # Drift + Eval + Fine-tuning
+├── dag_daily_fetch_data.py          # ✅ Ingestion données brutes → BigQuery (DONE)
+├── dag_daily_prediction.py          # ⏳ Prédictions via /predict → BigQuery (NEXT)
+├── dag_monitor_and_train.py         # ⏳ Drift + Eval + Fine-tuning (PENDING)
 └── utils/
-    ├── bike_helpers.py               # Fonctions BigQuery, GCS
-    └── env_config.py                 # Config ENV/PROD avec Secret Manager
+    ├── bike_helpers.py               # ✅ Fonctions BigQuery, GCS
+    └── env_config.py                 # ✅ Config ENV/PROD avec Secret Manager
 ```
+
+**DAG Implementation Status:**
+
+| DAG | Status | Documentation | Tested | Notes |
+|-----|--------|---------------|--------|-------|
+| `dag_daily_fetch_data.py` | ✅ Complete | ✅ [docs/dags.md](docs/dags.md) | ✅ Yes | Idempotent, deduplication logic, partitioned table |
+| `dag_daily_prediction.py` | ⏳ Next | ⏳ Pending | ⏳ No | Calls `/predict` endpoint, stores results |
+| `dag_monitor_and_train.py` | ⏳ Pending | ⏳ Pending | ⏳ No | Drift detection + conditional fine-tuning |
 
 ---
 
-#### **3.3 DAG 1 : Ingestion des données** (`dag_daily_fetch_data.py`)
+#### **3.3 DAG 1 : Ingestion des données** (`dag_daily_fetch_data.py`) ✅ **COMPLETE**
 
-**Objectif** : Récupérer les données de trafic cycliste et stocker dans BigQuery
+**Status**: ✅ Implemented, Tested, Documented
 
-```python
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-from datetime import datetime, timedelta
-import requests
-import pandas as pd
-from google.cloud import bigquery
-from utils.env_config import get_env_config
+**Objectif** : Récupérer les données de trafic cycliste depuis l'API Paris Open Data et stocker dans BigQuery
 
-ENV_CONFIG = get_env_config()  # Gère DEV/PROD + Secret Manager
+**Key Features Implemented:**
 
-def fetch_bike_data_to_bq(**context):
-    """
-    Fetch latest bike traffic data from Paris Open Data API
-    Store in BigQuery: bike_traffic_raw.daily_YYYYMMDD
-    """
-    today = datetime.utcnow().strftime("%Y%m%d")
+- ✅ API pagination (100 records/page, up to 1000 total)
+- ✅ Deduplication logic (queries max existing date, filters duplicates)
+- ✅ Single partitioned table (`comptage_velo`) instead of daily tables
+- ✅ Data transformations (coordinates → lat/lon, date → TIMESTAMP)
+- ✅ Idempotent design (safe to rerun multiple times)
+- ✅ Validation task with graceful "no new data" handling
 
-    # Paris Open Data API (comptage vélo)
-    api_url = "https://opendata.paris.fr/api/explore/v2.1/catalog/datasets/comptage-velo-donnees-compteurs/records"
-    params = {
-        "limit": 1000,
-        "order_by": "date_et_heure_de_comptage DESC"
-    }
+**Architecture:**
 
-    response = requests.get(api_url, params=params)
-    if response.status_code != 200:
-        raise Exception(f"❌ API failed: {response.status_code}")
-
-    data = response.json()
-    df = pd.DataFrame([r['fields'] for r in data['results']])
-    df["ingestion_ts"] = datetime.utcnow().isoformat()
-
-    # Write to BigQuery
-    table_id = f"{ENV_CONFIG['BQ_PROJECT']}.bike_traffic_raw.daily_{today}"
-    df.to_gbq(
-        destination_table=table_id,
-        project_id=ENV_CONFIG['BQ_PROJECT'],
-        if_exists="replace",
-        location=ENV_CONFIG['BQ_LOCATION']
-    )
-
-    print(f"✅ Ingested {len(df)} records into {table_id}")
-
-with DAG(
-    dag_id="daily_fetch_bike_data",
-    schedule_interval="@daily",
-    start_date=datetime(2024, 10, 1),
-    catchup=False,
-    tags=["bike", "ingestion", "bigquery"]
-) as dag:
-
-    fetch_task = PythonOperator(
-        task_id="fetch_to_bigquery",
-        python_callable=fetch_bike_data_to_bq
-    )
+```text
+Paris Open Data API
+    ↓ (pagination: 10 pages × 100 records)
+fetch_to_bigquery
+    ↓ (deduplication: filter existing data)
+BigQuery: bike_traffic_raw.comptage_velo
+    ↓ (validation: check recent ingestion)
+validate_ingestion
+    ✅ Success
 ```
+
+**Test Results:**
+
+```text
+Run 1 (First time):
+✅ Successfully appended 1000 records to bike_traffic_raw.comptage_velo
+
+Run 2 (Same data):
+📊 Latest data in BigQuery: 2025-10-26 22:00:00+00:00
+🔍 Filtered out 1000 existing records (keeping 0 new records)
+ℹ️ No new data to ingest (all data already exists in BigQuery)
+✅ Validation passed: No new data to ingest (all data already exists)
+```
+
+**Documentation**: See [docs/dags.md](docs/dags.md) for complete implementation details
+
+**Files Modified:**
+
+- ✅ [dags/dag_daily_fetch_data.py](dags/dag_daily_fetch_data.py) - Complete implementation
+- ✅ [dags/utils/bike_helpers.py](dags/utils/bike_helpers.py) - BigQuery helpers
+- ✅ [dags/utils/env_config.py](dags/utils/env_config.py) - Environment config
+- ✅ [docs/dags.md](docs/dags.md) - Full documentation with examples
 
 ---
 
-#### **3.4 DAG 2 : Prédictions quotidiennes** (`dag_daily_prediction.py`)
+#### **3.4 DAG 2 : Prédictions quotidiennes** (`dag_daily_prediction.py`) ⏳ **NEXT PRIORITY**
+
+**Status**: ⏳ To be implemented
 
 **Objectif** : Lire BigQuery → Prédire via `/predict` → Stocker résultats
 
-```python
-from airflow import DAG
-from airflow.operators.python import PythonOperator
-from datetime import datetime, timedelta
-import requests
-import pandas as pd
-from google.cloud import bigquery
-from utils.env_config import get_env_config
+**Implementation Plan:**
 
-ENV_CONFIG = get_env_config()
+1. Read from `bike_traffic_raw.comptage_velo` (latest partitions)
+2. Call `/predict` endpoint with batch of records
+3. Store predictions in `bike_traffic_predictions` dataset
+4. Validate prediction results
+5. Add deduplication logic (similar to DAG 1)
+6. Document in [docs/dags.md](docs/dags.md)
 
-def run_daily_prediction(**context):
-    """
-    1. Read from BigQuery raw table
-    2. Call /predict endpoint
-    3. Store predictions in BigQuery predictions table
-    """
-    today = datetime.utcnow().strftime("%Y%m%d")
-    bq = bigquery.Client()
+**Key Decisions Needed:**
 
-    # 1️⃣ Read raw data
-    raw_table = f"{ENV_CONFIG['BQ_PROJECT']}.bike_traffic_raw.daily_{today}"
-    df = bq.query(f"SELECT * FROM `{raw_table}` LIMIT 500").to_dataframe()
-
-    # 2️⃣ Call /predict endpoint
-    api_url = f"{ENV_CONFIG['API_URL']}/predict"
-    response = requests.post(api_url, json={
-        "records": df.to_dict(orient="records"),
-        "model_type": "rf",
-        "metric": "r2"
-    })
-
-    if response.status_code != 200:
-        raise Exception(f"❌ Prediction failed: {response.text}")
-
-    predictions = response.json()["predictions"]
-    df["prediction"] = predictions
-    df["model_type"] = "rf"
-    df["prediction_ts"] = datetime.utcnow().isoformat()
-
-    # 3️⃣ Store in BigQuery
-    pred_table = f"{ENV_CONFIG['BQ_PROJECT']}.bike_traffic_predictions.daily_{today}"
-    df.to_gbq(
-        destination_table=pred_table,
-        project_id=ENV_CONFIG['BQ_PROJECT'],
-        if_exists="replace",
-        location=ENV_CONFIG['BQ_LOCATION']
-    )
-
-    print(f"✅ Predictions saved to {pred_table}")
-
-with DAG(
-    dag_id="daily_prediction",
-    schedule_interval="@daily",
-    start_date=datetime(2024, 10, 1),
-    catchup=False,
-    tags=["bike", "prediction", "bigquery"]
-) as dag:
-
-    predict_task = PythonOperator(
-        task_id="predict_daily_data",
-        python_callable=run_daily_prediction
-    )
-```
+- Prediction table schema (daily tables vs partitioned?)
+- Which model to use for predictions (`rf`, `nn`, or both?)
+- Batch size for `/predict` endpoint calls
 
 ---
 
-#### **3.5 DAG 3 : Monitoring + Fine-tuning** (`dag_monitor_and_train.py`)
+#### **3.5 DAG 3 : Monitoring + Fine-tuning** (`dag_monitor_and_train.py`) ⏳ **PENDING**
+
+**Status**: ⏳ To be implemented after DAG 2
 
 **Objectif** : Drift detection → Validation → Fine-tuning conditionnel
 
-```python
-from airflow import DAG
-from airflow.operators.python import PythonOperator, BranchPythonOperator
-from datetime import datetime, timedelta
-import requests
-import pandas as pd
-from google.cloud import bigquery
-from utils.env_config import get_env_config
+**Implementation Plan:**
 
-ENV_CONFIG = get_env_config()
+1. **Drift Detection**: Use Evidently to compare reference vs current data
+2. **Model Validation**: Compare predictions vs actuals from BigQuery
+3. **Decision Logic**: Conditional branching based on:
+   - Drift detected + R² < threshold OR RMSE > threshold → Fine-tune
+   - Otherwise → End without training
+4. **Fine-tuning**: Call `/train` endpoint (already tested and working)
+5. **Audit Logging**: Store all metrics in `monitoring_audit.logs`
+6. **Document**: Add to [docs/dags.md](docs/dags.md) when implemented
 
-# 1️⃣ DRIFT DETECTION
-def run_drift_monitoring(**context):
-    """
-    Compare reference vs current data using Evidently
-    Calls backend endpoint /monitor for drift detection
-    """
-    today = datetime.utcnow().strftime("%Y%m%d")
-    bq = bigquery.Client()
-
-    # Load current data from BigQuery
-    curr_table = f"{ENV_CONFIG['BQ_PROJECT']}.bike_traffic_raw.daily_{today}"
-    df_curr = bq.query(f"SELECT * FROM `{curr_table}` LIMIT 1000").to_dataframe()
-
-    # Call /monitor endpoint with reference data from GCS
-    response = requests.post(f"{ENV_CONFIG['API_URL']}/monitor", json={
-        "reference_path": "gs://df_traffic_cyclist1/data/reference_data.csv",
-        "current_data": df_curr.to_dict(orient="records"),
-        "output_html": f"drift_report_{today}.html"
-    })
-
-    if response.status_code != 200:
-        raise Exception(f"❌ Drift detection failed: {response.text}")
-
-    result = response.json()
-    drift_detected = result["drift_summary"]["drift_detected"]
-
-    context['ti'].xcom_push(key="drift_detected", value=drift_detected)
-    print(f"{'🚨 Drift detected' if drift_detected else '✅ No drift'}")
-
-# 2️⃣ MODEL VALIDATION
-def validate_model(**context):
-    """
-    Compare predictions vs true labels from BigQuery
-    Calculate RMSE and R² for model performance
-    """
-    today = datetime.utcnow().strftime("%Y%m%d")
-    bq = bigquery.Client()
-
-    # Join predictions with actual values
-    query = f"""
-    SELECT
-        p.prediction,
-        r.`Comptage horaire` as true_value
-    FROM `{ENV_CONFIG['BQ_PROJECT']}.bike_traffic_predictions.daily_{today}` p
-    JOIN `{ENV_CONFIG['BQ_PROJECT']}.bike_traffic_raw.daily_{today}` r
-    ON p.`Identifiant du compteur` = r.`Identifiant du compteur`
-    """
-
-    df = bq.query(query).to_dataframe()
-
-    from sklearn.metrics import mean_squared_error, r2_score
-    import numpy as np
-
-    rmse = np.sqrt(mean_squared_error(df['true_value'], df['prediction']))
-    r2 = r2_score(df['true_value'], df['prediction'])
-
-    context['ti'].xcom_push(key="rmse", value=rmse)
-    context['ti'].xcom_push(key="r2", value=r2)
-
-    print(f"📊 RMSE: {rmse:.2f}, R²: {r2:.4f}")
-
-# 3️⃣ DECISION LOGIC
-def decide_if_fine_tune(**context):
-    """
-    Decide whether to trigger fine-tuning based on:
-    - Drift detected
-    - R² below threshold (0.65)
-    - RMSE above threshold (60.0)
-    """
-    drift = context['ti'].xcom_pull(task_ids="monitor_drift", key="drift_detected")
-    r2 = context['ti'].xcom_pull(task_ids="validate_model", key="r2")
-    rmse = context['ti'].xcom_pull(task_ids="validate_model", key="rmse")
-
-    R2_THRESHOLD = 0.65
-    RMSE_THRESHOLD = 60.0
-
-    if drift and (r2 < R2_THRESHOLD or rmse > RMSE_THRESHOLD):
-        print(f"🚨 Fine-tuning needed: drift={drift}, R²={r2:.4f}, RMSE={rmse:.2f}")
-        return "fine_tune_model"
-    else:
-        print(f"✅ Model OK: drift={drift}, R²={r2:.4f}, RMSE={rmse:.2f}")
-        return "end_monitoring"
-
-# 4️⃣ FINE-TUNING VIA /train ENDPOINT
-def fine_tune_model(**context):
-    """
-    Call /train endpoint with fine_tuning=True
-    Uses latest data from BigQuery for incremental learning
-    """
-    today = datetime.utcnow().strftime("%Y%m%d")
-    bq = bigquery.Client()
-
-    # Get fresh data from BigQuery
-    table = f"{ENV_CONFIG['BQ_PROJECT']}.bike_traffic_raw.daily_{today}"
-    df_fresh = bq.query(f"SELECT * FROM `{table}` LIMIT 2000").to_dataframe()
-
-    # Call /train endpoint with fine-tuning mode
-    response = requests.post(f"{ENV_CONFIG['API_URL']}/train", json={
-        "model_type": "rf",
-        "data_source": "bigquery",
-        "data": df_fresh.to_dict(orient="records"),
-        "env": ENV_CONFIG['ENV'],
-        "fine_tuning": True,
-        "learning_rate": 0.01,
-        "epochs": 10
-    }, timeout=600)
-
-    if response.status_code != 200:
-        raise Exception(f"❌ Fine-tuning failed: {response.text}")
-
-    result = response.json()
-
-    # Log to BigQuery audit
-    audit_df = pd.DataFrame([{
-        "timestamp": datetime.utcnow(),
-        "drift_detected": context['ti'].xcom_pull(task_ids="monitor_drift", key="drift_detected"),
-        "rmse": context['ti'].xcom_pull(task_ids="validate_model", key="rmse"),
-        "r2": context['ti'].xcom_pull(task_ids="validate_model", key="r2"),
-        "fine_tune_triggered": True,
-        "fine_tune_success": True,
-        "model_improvement": result.get("r2_improvement", 0.0),
-        "env": ENV_CONFIG['ENV']
-    }])
-
-    audit_df.to_gbq(
-        destination_table=f"{ENV_CONFIG['BQ_PROJECT']}.monitoring_audit.logs",
-        project_id=ENV_CONFIG['BQ_PROJECT'],
-        if_exists="append",
-        location=ENV_CONFIG['BQ_LOCATION']
-    )
-
-    print(f"✅ Fine-tuning completed: R² improvement = {result.get('r2_improvement', 0):.4f}")
-
-# 5️⃣ END WITHOUT TRAINING
-def end_monitoring(**context):
-    """Log monitoring results without training"""
-    audit_df = pd.DataFrame([{
-        "timestamp": datetime.utcnow(),
-        "drift_detected": context['ti'].xcom_pull(task_ids="monitor_drift", key="drift_detected"),
-        "rmse": context['ti'].xcom_pull(task_ids="validate_model", key="rmse"),
-        "r2": context['ti'].xcom_pull(task_ids="validate_model", key="r2"),
-        "fine_tune_triggered": False,
-        "fine_tune_success": False,
-        "model_improvement": 0.0,
-        "env": ENV_CONFIG['ENV']
-    }])
-
-    audit_df.to_gbq(
-        destination_table=f"{ENV_CONFIG['BQ_PROJECT']}.monitoring_audit.logs",
-        project_id=ENV_CONFIG['BQ_PROJECT'],
-        if_exists="append",
-        location=ENV_CONFIG['BQ_LOCATION']
-    )
-
-    print("✅ Monitoring complete - no training needed")
-
-# === DAG DEFINITION ===
-with DAG(
-    dag_id="monitor_and_fine_tune",
-    schedule_interval="@weekly",
-    start_date=datetime(2024, 10, 1),
-    catchup=False,
-    tags=["bike", "monitoring", "drift", "training"]
-) as dag:
-
-    monitor = PythonOperator(
-        task_id="monitor_drift",
-        python_callable=run_drift_monitoring
-    )
-
-    validate = PythonOperator(
-        task_id="validate_model",
-        python_callable=validate_model
-    )
-
-    decide = BranchPythonOperator(
-        task_id="decide_fine_tune",
-        python_callable=decide_if_fine_tune
-    )
-
-    fine_tune = PythonOperator(
-        task_id="fine_tune_model",
-        python_callable=fine_tune_model
-    )
-
-    end = PythonOperator(
-        task_id="end_monitoring",
-        python_callable=end_monitoring,
-        trigger_rule="none_failed_min_one_success"
-    )
-
-    # Pipeline flow
-    monitor >> validate >> decide
-    decide >> [fine_tune, end]
-```
-
-**Visualisation du DAG** :
+**Architecture Flow:**
 
 ```text
-[Monitor Drift] → [Validate Model] → [Decide]
-                                        ├─→ [Fine-tune] → [End]
-                                        └─→ [End (no training)]
+[Monitor Drift] → [Validate Model] → [Decision]
+                                        ├─→ [Fine-tune via /train] → [Log Audit]
+                                        └─→ [Log Audit (no training)]
 ```
+
+**Key Features:**
+
+- Weekly schedule (configurable)
+- BranchPythonOperator for conditional logic
+- Integration with existing `/train` endpoint
+- Complete audit trail in BigQuery
 
 ---
 
-#### **3.6 Prometheus + Grafana (Métriques API)**
+#### **3.6 Prometheus + Grafana (Métriques API)** ⏳ **PENDING**
 
-**Instrumentation FastAPI** :
+**Status**: ⏳ To be implemented
 
-```python
-# backend/regmodel/app/fastapi_app.py
-from prometheus_client import Counter, Histogram, Gauge, make_asgi_app
-from starlette.middleware.base import BaseHTTPMiddleware
-import time
+**Objectif**: Monitoring temps réel des API endpoints et modèles ML
 
-# Métriques custom
-predictions_total = Counter('predictions_total', 'Total predictions', ['model_type'])
-prediction_latency = Histogram('prediction_latency_seconds', 'Prediction latency', ['model_type'])
-active_models = Gauge('active_models_count', 'Cached models count')
-training_total = Counter('training_total', 'Total training runs', ['model_type', 'status'])
+**Implementation Plan:**
 
-class PrometheusMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        start = time.time()
-        response = await call_next(request)
-        duration = time.time() - start
+1. **FastAPI Instrumentation**:
+   - Add `prometheus_client` middleware
+   - Expose `/metrics` endpoint
+   - Track: predictions_total, prediction_latency, active_models, training_total
 
-        if request.url.path == "/predict":
-            model_type = getattr(request.state, 'model_type', 'unknown')
-            predictions_total.labels(model_type=model_type).inc()
-            prediction_latency.labels(model_type=model_type).observe(duration)
+2. **Docker Compose**:
+   - Add Prometheus service (port 9090)
+   - Add Grafana service (port 3000)
+   - Configure scraping of regmodel-backend `/metrics`
 
-        return response
+3. **Grafana Dashboards**:
+   - API request rate (requests/sec)
+   - Prediction latency (p50, p95, p99)
+   - Error rate (5xx responses)
+   - Training success rate
+   - Model cache size
 
-app.add_middleware(PrometheusMiddleware)
+**Access Points** (when implemented):
 
-# Endpoint métriques
-metrics_app = make_asgi_app()
-app.mount("/metrics", metrics_app)
-
-@app.get("/health")
-def health():
-    active_models.set(len(model_cache))
-    return {"status": "healthy", "cached_models": len(model_cache)}
-```
-
-**Docker Compose** :
-
-```yaml
-# docker-compose.yaml (ajout)
-services:
-  prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    ports:
-      - "9090:9090"
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=15d'
-
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
-    depends_on:
-      - prometheus
-
-volumes:
-  prometheus_data:
-  grafana_data:
-```
-
-**Configuration Prometheus** :
-
-```yaml
-# monitoring/prometheus.yml
-global:
-  scrape_interval: 15s
-
-scrape_configs:
-  - job_name: 'regmodel-api'
-    static_configs:
-      - targets: ['regmodel-backend:8000']
-    metrics_path: '/metrics'
-```
-
-**Dashboard Grafana** :
-
-- Requêtes/sec : `rate(predictions_total[5m])`
-- Latence p50/p95/p99 : `histogram_quantile(0.95, prediction_latency_seconds)`
-- Taux erreur : `rate(http_requests_total{status=~"5.."}[5m])`
-- Trainings réussis : `rate(training_total{status="success"}[1h])`
+- Prometheus: <http://localhost:9090>
+- Grafana: <http://localhost:3000> (admin/admin)
 
 ---
 
@@ -1054,6 +745,53 @@ ds_traffic_cycliste1/
 - [ ] Démo vidéo de secours
 - [ ] Diagramme architecture MLOps complet
 - [ ] Exemples de métriques/dashboards
+
+---
+
+## 📈 Recent Progress Summary (2025-10-28)
+
+### ✅ Phase 3.3 - DAG 1 Implementation Complete
+
+**What was accomplished:**
+
+1. **Docker Infrastructure Fixes**:
+   - Fixed multi-platform support (WSL2 amd64 + Mac arm64)
+   - Resolved Airflow permission issues (logs directory)
+   - Configured volume mounts for shared_data and models
+
+2. **BigQuery Architecture**:
+   - Created `bike_traffic_raw` dataset in BigQuery
+   - Implemented single partitioned table (`comptage_velo`) instead of daily tables
+   - Partitioning: Daily partitions on `date_et_heure_de_comptage`
+   - Clustering: By `identifiant_du_compteur` for query optimization
+
+3. **DAG 1 Implementation** ([dags/dag_daily_fetch_data.py](dags/dag_daily_fetch_data.py)):
+   - API pagination handling (100 records/page, up to 1000 total)
+   - Deduplication logic to prevent duplicate insertions
+   - Data transformations (coordinates extraction, date conversion)
+   - Validation task with graceful "no new data" handling
+   - Idempotent design (safe to rerun multiple times)
+
+4. **Documentation**:
+   - Complete DAG documentation in [docs/dags.md](docs/dags.md)
+   - Real log examples showing deduplication in action
+   - Architecture diagrams and data flow
+
+**Test Results:**
+
+- ✅ First run: 1000 records ingested successfully
+- ✅ Second run: 0 new records (all duplicates filtered)
+- ✅ Validation passes gracefully in both cases
+
+**Commits:**
+
+- `b32efcd` - feat: add deduplication logic to daily fetch DAG and document architecture
+
+**Next Steps:**
+
+- 🔄 Implement DAG 2 (`dag_daily_prediction.py`)
+- ⏳ Implement DAG 3 (`dag_monitor_and_train.py`)
+- ⏳ Add Prometheus + Grafana monitoring
 
 ---
 
