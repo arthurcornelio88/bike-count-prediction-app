@@ -45,6 +45,32 @@ def fetch_bike_data_to_bq(**context):
         ENV_CONFIG["BQ_LOCATION"],
     )
 
+    # Check existing data to avoid duplicates
+    table_name = "comptage_velo"
+    table_id = f"{ENV_CONFIG['BQ_RAW_DATASET']}.{table_name}"
+    full_table_id = f"{ENV_CONFIG['BQ_PROJECT']}.{table_id}"
+
+    client = bigquery.Client(project=ENV_CONFIG["BQ_PROJECT"])
+
+    # Get the latest date already in BigQuery
+    try:
+        query = f"""
+        SELECT MAX(date_et_heure_de_comptage) as max_date
+        FROM `{full_table_id}`
+        """  # nosec B608
+        result = client.query(query).to_dataframe()
+        max_existing_date = result["max_date"].iloc[0]
+        if pd.notna(max_existing_date):
+            print(f"📊 Latest data in BigQuery: {max_existing_date}")
+            # Add a small buffer to avoid edge cases
+            cutoff_date = max_existing_date.isoformat()
+        else:
+            cutoff_date = None
+            print("📊 No existing data in BigQuery, fetching all available data")
+    except Exception as e:
+        print(f"⚠️ Table doesn't exist yet or error checking: {e}")
+        cutoff_date = None
+
     # Paris Open Data API (comptage vélo - données compteurs)
     api_url = "https://opendata.paris.fr/api/explore/v2.1/catalog/datasets/comptage-velo-donnees-compteurs/records"
 
@@ -56,6 +82,8 @@ def fetch_bike_data_to_bq(**context):
     all_records = []
 
     print(f"🌐 Fetching data from API (pagination with limit={page_size})")
+    if cutoff_date:
+        print(f"   Only fetching data newer than {cutoff_date}")
 
     while len(all_records) < max_records:
         params = {
@@ -137,6 +165,17 @@ def fetch_bike_data_to_bq(**context):
             df["date_et_heure_de_comptage"], errors="coerce"
         )
 
+    # Filter out records older than cutoff_date to avoid duplicates
+    if cutoff_date and "date_et_heure_de_comptage" in df.columns:
+        original_count = len(df)
+        cutoff_datetime = pd.to_datetime(cutoff_date)
+        df = df[df["date_et_heure_de_comptage"] > cutoff_datetime]
+        filtered_count = len(df)
+        print(
+            f"🔍 Filtered out {original_count - filtered_count} existing records "
+            f"(keeping {filtered_count} new records)"
+        )
+
     # Add ingestion timestamp
     df["ingestion_ts"] = datetime.utcnow()
 
@@ -157,11 +196,18 @@ def fetch_bike_data_to_bq(**context):
     print(
         f"📊 Final dataset: {len(df_clean)} records, {len(available_columns)} columns"
     )
-    print(f"📊 Sample data:\n{df_clean.head(2)}")
 
     # Data quality checks
     if len(df_clean) == 0:
-        raise Exception("❌ No valid data after cleaning")
+        print("ℹ️ No new data to ingest (all data already exists in BigQuery)")
+        # Push metadata to XCom for downstream tasks
+        context["ti"].xcom_push(key="records_count", value=0)
+        context["ti"].xcom_push(key="table_id", value=full_table_id)
+        context["ti"].xcom_push(key="ingestion_date", value=today)
+        context["ti"].xcom_push(key="no_new_data", value=True)
+        return
+
+    print(f"📊 Sample data:\n{df_clean.head(2)}")
 
     # Write to BigQuery - Single partitioned table instead of daily tables
     table_name = "comptage_velo"
@@ -208,6 +254,14 @@ def validate_ingestion(**context):
     Validates records ingested in the last 5 minutes (this DAG run)
     """
     # Pull metadata from previous task
+    no_new_data = context["ti"].xcom_pull(
+        task_ids="fetch_to_bigquery", key="no_new_data"
+    )
+
+    if no_new_data:
+        print("✅ Validation passed: No new data to ingest (all data already exists)")
+        return
+
     table_id = context["ti"].xcom_pull(task_ids="fetch_to_bigquery", key="table_id")
     records_count = context["ti"].xcom_pull(
         task_ids="fetch_to_bigquery", key="records_count"
