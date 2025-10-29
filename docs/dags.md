@@ -154,9 +154,9 @@ reruns or schedule adjustments.
 
 ## 2. Daily Prediction DAG
 
-**DAG ID**: `daily_prediction`
-**Schedule**: Daily at 7:00 AM UTC (1h after data ingestion)
-**Purpose**: Generate predictions for recent bike traffic data using ML models and store results in BigQuery
+- **DAG ID**: `daily_prediction`
+- **Schedule**: Daily at 7:00 AM UTC (1h after data ingestion)
+- **Purpose**: Generate predictions for recent bike traffic data using ML models and store results in BigQuery
 
 ### Architecture Overview
 
@@ -262,6 +262,8 @@ identifiant_du_compteur       STRING    - Counter ID
 date_et_heure_de_comptage     TIMESTAMP - Data timestamp
 ```
 
+![alt text](/docs/img/predictions_bq.png)
+
 **Success Example**:
 
 ```text
@@ -361,12 +363,6 @@ validate_predictions
    Fallback: 'Totem 73 boulevard de Sébastopol'
    Unknown: ['147 avenue d'Italie [Bike]', ...]
 ```
-
-**Future Enhancement**: Replace print statements with:
-
-- Prometheus metrics for real-time monitoring
-- BigQuery audit table for historical tracking
-- Automatic retraining trigger when drift > 10%
 
 ### Quality Metrics
 
