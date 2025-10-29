@@ -166,17 +166,18 @@ curl -X POST "http://localhost:8000/train" \
 
 ### **Phase 3 : Orchestration Airflow + Monitoring Production** (`feat/mlops-airflow-pipeline`)
 
-**Status**: 🔄 In Progress (DAG 1/3 Complete ✅)
+**Status**: 🔄 In Progress (DAG 2/3 Complete ✅)
 
 **Progress Summary:**
 
 - ✅ MLflow Cloud SQL backend configured (team collaboration enabled)
 - ✅ Airflow stack deployed via docker-compose (WSL2 + Mac multi-platform support)
-- ✅ **DAG 1/3 COMPLETE**: `dag_daily_fetch_data.py` - Fully tested and documented
-- 🔄 **DAG 2/3 IN PROGRESS**: `dag_daily_prediction.py` - Next priority
-- ⏳ **DAG 3/3 PENDING**: `dag_monitor_and_train.py`
-- ✅ BigQuery dataset created (`bike_traffic_raw`)
+- ✅ **DAG 1/3 COMPLETE**: `dag_daily_fetch_data.py` - Data ingestion with deduplication
+- ✅ **DAG 2/3 COMPLETE**: `dag_daily_prediction.py` - ML predictions with drift handling
+- ⏳ **DAG 3/3 PENDING**: `dag_monitor_and_train.py` - Next priority
+- ✅ BigQuery datasets: `bike_traffic_raw` (raw data), `bike_traffic_predictions` (predictions)
 - ✅ BigQuery partitioned table architecture implemented (`comptage_velo`)
+- ✅ Data drift handling in ML API (unknown compteurs fallback)
 - ⏳ Prometheus + Grafana monitoring pending
 
 **Objectifs unifiés** :
@@ -397,8 +398,8 @@ dags/
 
 | DAG | Status | Documentation | Tested | Notes |
 |-----|--------|---------------|--------|-------|
-| `dag_daily_fetch_data.py` | ✅ Complete | ✅ [docs/dags.md](docs/dags.md) | ✅ Yes | Idempotent, deduplication logic, partitioned table |
-| `dag_daily_prediction.py` | ⏳ Next | ⏳ Pending | ⏳ No | Calls `/predict` endpoint, stores results |
+| `dag_daily_fetch_data.py` | ✅ Complete | ✅ [docs/dags.md](docs/dags.md#1-daily-fetch-bike-data-dag) | ✅ Yes | Idempotent, deduplication, partitioned table |
+| `dag_daily_prediction.py` | ✅ Complete | ✅ [docs/dags.md](docs/dags.md#2-daily-prediction-dag) | ✅ Yes | ML predictions, drift handling, R²=0.79 |
 | `dag_monitor_and_train.py` | ⏳ Pending | ⏳ Pending | ⏳ No | Drift detection + conditional fine-tuning |
 
 ---
@@ -455,26 +456,53 @@ Run 2 (Same data):
 
 ---
 
-#### **3.4 DAG 2 : Prédictions quotidiennes** (`dag_daily_prediction.py`) ⏳ **NEXT PRIORITY**
+#### **3.4 DAG 2 : Prédictions quotidiennes** (`dag_daily_prediction.py`) ✅ **COMPLETE**
 
-**Status**: ⏳ To be implemented
+**Status**: ✅ Implemented, Tested, Documented
 
-**Objectif** : Lire BigQuery → Prédire via `/predict` → Stocker résultats
+**Objectif** : Lire BigQuery → Prédire via `/predict` → Stocker résultats avec gestion du data drift
 
-**Implementation Plan:**
+**Key Features Implemented:**
 
-1. Read from `bike_traffic_raw.comptage_velo` (latest partitions)
-2. Call `/predict` endpoint with batch of records
-3. Store predictions in `bike_traffic_predictions` dataset
-4. Validate prediction results
-5. Add deduplication logic (similar to DAG 1)
-6. Document in [docs/dags.md](docs/dags.md)
+- ✅ Reads last 24h of data from partitioned table (`comptage_velo`)
+- ✅ 7-day lookback for data availability check
+- ✅ Data transformation for API compatibility (coordinates reconstruction)
+- ✅ ML API `/predict` endpoint integration (Random Forest model)
+- ✅ Data drift handling (unknown compteurs fallback)
+- ✅ Prediction quality metrics (RMSE, MAE, R²)
+- ✅ Storage in daily prediction tables (`daily_YYYYMMDD`)
+- ✅ End-to-end validation
 
-**Key Decisions Needed:**
+**Test Results (2025-10-29):**
 
-- Prediction table schema (daily tables vs partitioned?)
-- Which model to use for predictions (`rf`, `nn`, or both?)
-- Batch size for `/predict` endpoint calls
+- Task 1: 2000 rows available (last 7 days)
+- Task 2: 291 predictions generated (last 24h)
+- Task 3: All validations passed
+- Metrics: RMSE=32.70, MAE=24.17, R²=0.7856 (excellent!)
+- Avg prediction: 61.05 bikes/hour, Range: 37.97-401.07
+
+**Data Drift Handling:**
+
+Backend handles new bike counters not seen during training:
+
+- Maps unknown compteurs to known fallback category
+- Logs warnings for monitoring
+- Pipeline continues without crashes
+- TODO: Prometheus metrics + BigQuery audit logging
+
+**Architecture Decisions:**
+
+- Daily prediction tables (easier day-to-day comparison)
+- Random Forest (RF) model for predictions
+- Batch size: up to 500 records per run
+
+**Documentation**: [docs/dags.md#2-daily-prediction-dag](docs/dags.md#2-daily-prediction-dag)
+
+**Files Modified:**
+
+- ✅ [dags/dag_daily_prediction.py](dags/dag_daily_prediction.py)
+- ✅ [backend/regmodel/app/classes.py](backend/regmodel/app/classes.py)
+- ✅ [docs/dags.md](docs/dags.md#2-daily-prediction-dag)
 
 ---
 
@@ -787,13 +815,51 @@ ds_traffic_cycliste1/
 
 **Commits:**
 
-- `b32efcd` - feat: add deduplication logic to daily fetch DAG and document architecture
+- `2a67887` - feat: add deduplication logic to daily fetch DAG and document architecture
+
+---
+
+### ✅ Phase 3.4 - DAG 2 Implementation Complete (2025-10-29)
+
+**What was accomplished:**
+
+1. **DAG 2 Adaptation to Partitioned Tables**:
+   - Modified to read from `comptage_velo` instead of daily tables
+   - Added 7-day lookback check for data availability
+   - Query last 24h for predictions (up to 500 records)
+
+2. **Data Transformation Pipeline**:
+   - Reconstruct `coordonnées_géographiques` from lat/lon
+   - Convert timestamps to strings for JSON serialization
+   - Add pandas import for datetime detection
+
+3. **Backend Data Drift Handling**:
+   - Unknown compteurs mapped to fallback (first known category)
+   - Patch loaded models for backward compatibility
+   - Add logging for drift detection (TODO: Prometheus + BigQuery audit)
+   - Applied to: NNPipeline, AffluenceClassifierPipeline, RFPipeline
+
+4. **End-to-End Testing**:
+   - Task 1: 2000 rows found (last 7 days)
+   - Task 2: 291 predictions generated (last 24h)
+   - Task 3: Validation passed
+   - Metrics: RMSE=32.70, MAE=24.17, R²=0.7856 (excellent!)
+
+5. **Documentation**:
+   - Complete DAG 2 documentation in [docs/dags.md#2-daily-prediction-dag](docs/dags.md#2-daily-prediction-dag)
+   - Data drift handling explained with examples
+   - Quality metrics table with interpretation
+
+**Commits:**
+
+- `5c5722a` - feat: implement DAG 2 prediction pipeline with data drift handling
 
 **Next Steps:**
 
-- 🔄 Implement DAG 2 (`dag_daily_prediction.py`)
-- ⏳ Implement DAG 3 (`dag_monitor_and_train.py`)
-- ⏳ Add Prometheus + Grafana monitoring
+- ⏳ Implement DAG 3 (`dag_monitor_and_train.py`) - Monitoring + conditional retraining
+- ⏳ Add Prometheus metrics for data drift monitoring
+- ⏳ Add BigQuery audit table for drift events
+- ⏳ Add Prometheus + Grafana monitoring dashboard
 
 ---
 
