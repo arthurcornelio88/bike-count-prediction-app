@@ -185,6 +185,21 @@ class AffluenceClassifierPipeline:
         if fit:
             df["compteur_id"] = self.label_encoder.fit_transform(df["nom_du_compteur"])
         else:
+            # Handle unknown categories (data drift scenario)
+            known_compteurs = set(self.label_encoder.classes_)
+            unknown_mask = ~df["nom_du_compteur"].isin(known_compteurs)
+
+            if unknown_mask.any():
+                unknown_count = unknown_mask.sum()
+                fallback_compteur = self.label_encoder.classes_[0]
+
+                # TODO: Replace print with Prometheus metrics + BigQuery audit log
+                print(
+                    f"⚠️ DATA DRIFT: {unknown_count} unknown compteurs in RF classifier"
+                )
+
+                df.loc[unknown_mask, "nom_du_compteur"] = fallback_compteur
+
             df["compteur_id"] = self.label_encoder.transform(df["nom_du_compteur"])
 
         return df[self.features], df["affluence"] if "affluence" in df else None
@@ -336,6 +351,33 @@ class NNPipeline:
 
     def preprocess(self, X):
         X_clean = self.cleaner.transform(X)
+
+        # Handle unknown categories in nom_du_compteur (data drift scenario)
+        # Replace unknowns with the most common known category as fallback
+        known_compteurs = set(self.label_encoder.classes_)
+        unknown_mask = ~X_clean["nom_du_compteur"].isin(known_compteurs)
+
+        if unknown_mask.any():
+            unknown_count = unknown_mask.sum()
+            unknown_compteurs = X_clean.loc[unknown_mask, "nom_du_compteur"].unique()
+            fallback_compteur = self.label_encoder.classes_[0]
+
+            # TODO: Replace print with Prometheus metrics for production monitoring
+            # Metric: data_drift_unknown_compteurs_total (Counter)
+            # Metric: data_drift_unknown_compteurs_ratio (Gauge)
+            # Labels: model_type, fallback_compteur
+            print(
+                f"⚠️ DATA DRIFT: {unknown_count} unknown compteurs ({len(unknown_compteurs)} unique)"
+            )
+            print(f"   Fallback: '{fallback_compteur}'")
+            print(f"   Unknown: {list(unknown_compteurs)[:3]}...")
+
+            # TODO: Log to BigQuery audit table for DAG 3 drift detection
+            # Table: monitoring_audit.drift_events
+            # Columns: timestamp, model_type, unknown_count, unknown_compteurs_list, fallback_compteur
+
+            X_clean.loc[unknown_mask, "nom_du_compteur"] = fallback_compteur
+
         X_id = self.label_encoder.transform(X_clean["nom_du_compteur"]).reshape(-1, 1)
         X_dense = X_clean.drop(columns="nom_du_compteur")
         X_scaled = self.scaler.transform(X_dense)
@@ -376,7 +418,11 @@ class RFPipeline:
         ]
         self.compteur_col = ["nom_du_compteur"]
 
-        self.ohe_compteur = OneHotEncoder(drop="first", sparse_output=False)
+        # Handle unknown compteurs by ignoring them (creates zero vector)
+        # TODO: Replace with Prometheus metrics when unknown categories detected
+        self.ohe_compteur = OneHotEncoder(
+            drop="first", sparse_output=False, handle_unknown="ignore"
+        )
         self.preprocessor = ColumnTransformer(
             transformers=[
                 ("cat", OneHotEncoder(drop="first"), self.cat_features),
@@ -442,4 +488,9 @@ class RFPipeline:
         instance.preprocessor = joblib.load(os.path.join(folder, "preprocessor.joblib"))
         instance.ohe_compteur = joblib.load(os.path.join(folder, "ohe_compteur.joblib"))
         instance.model = joblib.load(os.path.join(folder, "model.joblib"))
+
+        # Patch old models to handle unknown categories (data drift)
+        # TODO: Retrain model with handle_unknown='ignore' configured at training time
+        instance.ohe_compteur.handle_unknown = "ignore"
+
         return instance

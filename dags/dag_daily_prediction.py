@@ -8,6 +8,7 @@ from airflow.operators.python import PythonOperator
 from datetime import datetime, timedelta
 import requests
 from google.cloud import bigquery
+import pandas as pd
 import os
 
 from utils.env_config import get_env_config
@@ -28,49 +29,64 @@ default_args = {
 
 def check_raw_data_exists(**context):
     """
-    Check if raw data exists for today in BigQuery
-    If not, skip prediction (no data to predict on)
+    Check if raw data exists in the partitioned BigQuery table
+    Query the most recent partition (last N days)
     """
-    today = datetime.utcnow().strftime("%Y%m%d")
+    # Use partitioned table instead of daily tables
     raw_table = (
-        f"{ENV_CONFIG['BQ_PROJECT']}.{ENV_CONFIG['BQ_RAW_DATASET']}.daily_{today}"
+        f"{ENV_CONFIG['BQ_PROJECT']}.{ENV_CONFIG['BQ_RAW_DATASET']}.comptage_velo"
     )
 
-    print(f"🔍 Checking if raw data exists: {raw_table}")
+    print(f"🔍 Checking if raw data exists in partitioned table: {raw_table}")
 
     client = bigquery.Client(project=ENV_CONFIG["BQ_PROJECT"])
 
     try:
-        table = client.get_table(raw_table)
-        row_count = table.num_rows
+        # Query to check for recent data (last 7 days)
+        query = f"""
+        SELECT COUNT(*) as row_count,
+               MIN(date_et_heure_de_comptage) as min_date,
+               MAX(date_et_heure_de_comptage) as max_date
+        FROM `{raw_table}`
+        WHERE date_et_heure_de_comptage >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+        """  # nosec B608
 
-        print(f"✅ Raw data found: {row_count} rows in {raw_table}")
+        df = client.query(query).to_dataframe()
+        row_count = df["row_count"].iloc[0]
+        min_date = df["min_date"].iloc[0]
+        max_date = df["max_date"].iloc[0]
 
         if row_count == 0:
-            raise Exception(f"❌ Table {raw_table} exists but is empty")
+            raise Exception(f"❌ No recent data found in {raw_table} (last 7 days)")
+
+        print(f"✅ Raw data found: {row_count} rows in {raw_table}")
+        print(f"📊 Data range: {min_date} to {max_date}")
 
         # Push to XCom
         context["ti"].xcom_push(key="raw_table", value=raw_table)
         context["ti"].xcom_push(key="row_count", value=row_count)
+        context["ti"].xcom_push(key="max_date", value=str(max_date))
 
         return True
 
     except Exception as e:
-        print(f"❌ Raw data not found: {e}")
+        print(f"❌ Raw data check failed: {e}")
         raise Exception(f"Cannot proceed with predictions: {e}")
 
 
 def run_daily_prediction(**context):
     """
-    1. Read from BigQuery raw table
+    1. Read from BigQuery partitioned raw table (recent data)
     2. Call /predict endpoint
     3. Store predictions in BigQuery predictions table
     """
     today = datetime.utcnow().strftime("%Y%m%d")
     raw_table = context["ti"].xcom_pull(task_ids="check_raw_data", key="raw_table")
+    max_date = context["ti"].xcom_pull(task_ids="check_raw_data", key="max_date")
 
     print(f"🤖 Running predictions for {today}")
     print(f"📊 Source table: {raw_table}")
+    print(f"📊 Latest data date: {max_date}")
 
     # Ensure predictions dataset exists
     create_bq_dataset_if_not_exists(
@@ -79,12 +95,15 @@ def run_daily_prediction(**context):
         ENV_CONFIG["BQ_LOCATION"],
     )
 
-    # 1️⃣ Read raw data from BigQuery
+    # 1️⃣ Read recent data from BigQuery partitioned table
     client = bigquery.Client(project=ENV_CONFIG["BQ_PROJECT"])
 
+    # Query most recent data (last 24 hours for prediction)
     query = f"""
     SELECT *
     FROM `{raw_table}`
+    WHERE date_et_heure_de_comptage >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
+    ORDER BY date_et_heure_de_comptage DESC
     LIMIT 500
     """  # nosec B608
 
@@ -96,6 +115,20 @@ def run_daily_prediction(**context):
 
     print(f"✅ Fetched {len(df)} records from BigQuery")
     print(f"📊 Columns: {df.columns.tolist()}")
+
+    # Reconstruct coordonnées_géographiques from latitude/longitude
+    # The API cleaner expects "lat,lon" format as a string
+    if "latitude" in df.columns and "longitude" in df.columns:
+        df["coordonnées_géographiques"] = (
+            df["latitude"].astype(str) + "," + df["longitude"].astype(str)
+        )
+        # Can drop individual lat/lon columns as they're not needed by the model
+        df = df.drop(columns=["latitude", "longitude"])
+
+    # Convert timestamp columns to strings for JSON serialization
+    for col in df.columns:
+        if pd.api.types.is_datetime64_any_dtype(df[col]):
+            df[col] = df[col].astype(str)
 
     # 2️⃣ Call /predict endpoint
     api_url = f"{ENV_CONFIG['API_URL']}/predict"
