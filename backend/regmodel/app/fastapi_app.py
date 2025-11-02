@@ -103,10 +103,11 @@ def predict(data: PredictRequest):
 # === Schéma de requête pour training ===
 class TrainRequest(BaseModel):
     model_type: str  # "rf", "nn", or "rf_class"
-    data_source: str = "reference"  # "reference" or "current"
+    data_source: str = "reference"  # "reference", "current", or "baseline"
     env: str = "prod"
     hyperparams: dict = {}  # Optional hyperparameters
     test_mode: bool = False  # Use small sample (1000 rows) for fast testing
+    current_data: List[dict] = None  # NEW: Optional current data for double evaluation
 
 
 # === Endpoint d'entraînement ===
@@ -115,17 +116,39 @@ def train_endpoint(request: TrainRequest):
     """
     Train a model and upload to GCS + summary.json.
 
-    Example request:
+    NEW: Supports double test set evaluation when current_data is provided.
+    - Splits current_data (80/20)
+    - Evaluates on test_baseline (fixed reference) + test_current (new distribution)
+    - Returns both metrics for deployment decision
+
+    Example request (basic):
     {
         "model_type": "rf",
-        "data_source": "reference",
+        "data_source": "baseline",
         "env": "prod",
         "hyperparams": {},
+        "test_mode": false
+    }
+
+    Example request (with double evaluation):
+    {
+        "model_type": "rf",
+        "data_source": "baseline",
+        "env": "prod",
+        "current_data": [{"col1": val1, ...}, ...],  # >= 200 samples
         "test_mode": false
     }
     """
     try:
         from app.train import train_model
+
+        # Convert current_data to DataFrame if provided
+        current_df = None
+        if request.current_data:
+            current_df = pd.DataFrame(request.current_data)
+            print(
+                f"📥 Received {len(current_df)} current data samples for double evaluation"
+            )
 
         # Call training function
         result = train_model(
@@ -134,9 +157,11 @@ def train_endpoint(request: TrainRequest):
             env=request.env,
             hyperparams=request.hyperparams,
             test_mode=request.test_mode,
+            current_data_df=current_df,  # NEW: Pass current data for double eval
         )
 
-        return {
+        # Build response with double evaluation results
+        response = {
             "status": "success",
             "model_type": request.model_type,
             "run_id": result.get("run_id"),
@@ -144,5 +169,182 @@ def train_endpoint(request: TrainRequest):
             "model_uri": result.get("model_uri"),
         }
 
+        # Add double evaluation results if available
+        if result.get("metrics_baseline"):
+            response.update(
+                {
+                    "metrics_baseline": result.get("metrics_baseline"),
+                    "metrics_current": result.get("metrics_current"),
+                    "baseline_regression": result.get("baseline_regression", False),
+                    "double_evaluation_enabled": True,
+                }
+            )
+        else:
+            response["double_evaluation_enabled"] = False
+
+        return response
+
     except Exception as e:
+        import traceback
+
+        print(f"❌ Training failed: {str(e)}")
+        print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
+
+
+# === Schéma de requête pour monitoring ===
+class MonitorRequest(BaseModel):
+    reference_path: str  # GCS path to reference sample
+    current_data: List[dict]  # Current data as list of records
+    output_html: str = "drift_report.html"  # Output HTML report name
+
+
+# === Endpoint de monitoring avec Evidently ===
+@app.post("/monitor")
+def monitor_endpoint(request: MonitorRequest):
+    """
+    Detect data drift using Evidently.
+
+    Compares reference data (sampled, from GCS) with current data.
+    Returns drift detection results and uploads HTML report to GCS.
+
+    Example request:
+    {
+        "reference_path": "gs://df_traffic_cyclist1/data/reference_data_sample.csv",
+        "current_data": [{"col1": val1, "col2": val2}, ...],
+        "output_html": "drift_report_20251029.html"
+    }
+
+    TODO [Phase 4 - Prometheus]: Add Prometheus metrics
+          - prometheus_client.Gauge('evidently_drift_detected')
+          - prometheus_client.Gauge('evidently_drift_share')
+          - prometheus_client.Counter('evidently_drift_checks_total')
+    """
+    try:
+        from evidently.report import Report
+        from evidently.metric_preset import DataDriftPreset
+        from google.cloud import storage
+
+        # Load reference data from GCS
+        print(f"📥 Loading reference data from {request.reference_path}")
+
+        if request.reference_path.startswith("gs://"):
+            path_parts = request.reference_path.replace("gs://", "").split("/", 1)
+            bucket_name = path_parts[0]
+            blob_path = path_parts[1]
+
+            project_id = os.getenv("BQ_PROJECT", "datascientest-460618")
+            client = storage.Client(project=project_id)
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob(blob_path)
+
+            temp_ref = os.path.join(tempfile.gettempdir(), "reference_data_sample.csv")
+            blob.download_to_filename(temp_ref)
+            df_reference = pd.read_csv(temp_ref)
+        else:
+            df_reference = pd.read_csv(request.reference_path)
+
+        print(f"✅ Loaded {len(df_reference)} reference records")
+
+        # Convert current data to DataFrame
+        df_current = pd.DataFrame(request.current_data)
+        print(f"✅ Loaded {len(df_current)} current records")
+
+        # Ensure both DataFrames have the same columns
+        common_cols = list(set(df_reference.columns) & set(df_current.columns))
+        if not common_cols:
+            raise ValueError("No common columns between reference and current data")
+
+        # Filter to relevant columns (exclude IDs, URLs, timestamps)
+        exclude_patterns = [
+            "id_",
+            "identifiant_",
+            "lien_",
+            "url_",
+            "photo",
+            "_ts",
+            "prediction",
+        ]
+        relevant_cols = [
+            col
+            for col in common_cols
+            if not any(pattern in col.lower() for pattern in exclude_patterns)
+        ]
+
+        if not relevant_cols:
+            print("⚠️ No relevant columns for drift, using all common columns")
+            relevant_cols = common_cols
+
+        df_reference = df_reference[relevant_cols]
+        df_current = df_current[relevant_cols]
+
+        print(f"📊 Analyzing {len(relevant_cols)} features for drift")
+
+        # Run Evidently drift detection
+        report = Report(metrics=[DataDriftPreset()])
+        report.run(reference_data=df_reference, current_data=df_current)
+
+        # Save HTML report locally first
+        local_report_path = os.path.join(tempfile.gettempdir(), request.output_html)
+        report.save_html(local_report_path)
+        print(f"📄 HTML report generated: {request.output_html}")
+
+        # Upload report to GCS
+        gcs_report_path = f"drift_reports/{request.output_html}"
+        gcs_bucket_name = os.getenv("GCS_BUCKET", "df_traffic_cyclist1")
+
+        project_id = os.getenv("BQ_PROJECT", "datascientest-460618")
+        gcs_client = storage.Client(project=project_id)
+        gcs_bucket = gcs_client.bucket(gcs_bucket_name)
+        report_blob = gcs_bucket.blob(gcs_report_path)
+        report_blob.upload_from_filename(local_report_path)
+
+        gcs_url = f"gs://{gcs_bucket_name}/{gcs_report_path}"
+        print(f"☁️ Report uploaded to {gcs_url}")
+
+        # Extract drift summary
+        report_dict = report.as_dict()
+        metrics = report_dict.get("metrics", [])
+
+        drift_detected = False
+        drift_share = 0.0
+        drifted_features = []
+
+        for metric in metrics:
+            if metric.get("metric") == "DatasetDriftMetric":
+                result = metric.get("result", {})
+                drift_detected = result.get("dataset_drift", False)
+                drift_share = result.get("drift_share", 0.0)
+                drifted_features = [
+                    k for k, v in result.get("drift_by_columns", {}).items() if v
+                ]
+                break
+
+        print(f"{'🚨 Drift detected!' if drift_detected else '✅ No drift detected'}")
+        print(f"   - Drift share: {drift_share:.2%}")
+        if drifted_features:
+            print(f"   - Drifted features: {', '.join(drifted_features[:10])}")
+
+        # TODO: Push metrics to Prometheus (Phase 4)
+        # prometheus_client.Gauge('evidently_drift_detected').set(1 if drift_detected else 0)
+        # prometheus_client.Gauge('evidently_drift_share').set(drift_share)
+
+        return {
+            "status": "success",
+            "drift_summary": {
+                "drift_detected": drift_detected,
+                "drift_share": drift_share,
+                "drifted_features": drifted_features,
+                "total_features": len(relevant_cols),
+                "reference_size": len(df_reference),
+                "current_size": len(df_current),
+            },
+            "report_url": gcs_url,
+        }
+
+    except Exception as e:
+        import traceback
+
+        print(f"❌ Drift detection failed: {str(e)}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Drift detection failed: {str(e)}")

@@ -90,6 +90,147 @@ def load_and_clean_data(path: str, preserve_target=False):
     return X, y
 
 
+def get_test_baseline_path(env: str) -> str:
+    """
+    Get environment-specific path to test_baseline.csv
+
+    Args:
+        env: "dev" or "prod"
+
+    Returns:
+        Path to test_baseline.csv (local for dev, GCS for prod)
+    """
+    if env == "dev":
+        # Local path for development (avoid downloading 300MB)
+        return "data/test_baseline.csv"
+    else:
+        # GCS path for production (from env var)
+        gcs_bucket = os.getenv("GCS_BUCKET", "df_traffic_cyclist1")
+        return f"gs://{gcs_bucket}/raw_data/test_baseline.csv"
+
+
+def evaluate_double(
+    model, test_baseline_path: str, current_data_df: pd.DataFrame, model_type: str
+):
+    """
+    Evaluate model on both test sets (baseline + current).
+
+    This implements the double test set evaluation strategy:
+    - test_baseline: Fixed reference test set (evaluates regression)
+    - test_current: 20% of current data (evaluates performance on new distribution)
+
+    Args:
+        model: Trained model (RFPipeline, NNPipeline, or AffluenceClassifierPipeline)
+        test_baseline_path: Path to test_baseline.csv (local or GCS)
+        current_data_df: Current data DataFrame (will be split 80/20)
+        model_type: "rf", "nn", or "rf_class"
+
+    Returns:
+        dict with:
+            - metrics_baseline: {"rmse", "r2", "mae"}
+            - metrics_current: {"rmse", "r2", "mae"}
+            - baseline_regression: bool (True if R² < 0.60)
+            - test_current_size: int
+            - test_baseline_size: int
+            - train_current_data: DataFrame (80% of current_data for augmented training)
+
+    Raises:
+        ValueError: If current_data_df has < 200 samples (insufficient for 80/20 split)
+    """
+    from sklearn.metrics import mean_absolute_error
+    import tempfile
+
+    print(f"\n{'='*60}")
+    print(f"🔬 DOUBLE EVALUATION STRATEGY - {model_type.upper()}")
+    print(f"{'='*60}")
+
+    # 1. Load test_baseline from GCS or local
+    print(f"📥 Loading test_baseline from {test_baseline_path}")
+    X_baseline, y_baseline = load_and_clean_data(test_baseline_path)
+    print(f"✅ Baseline test set loaded: {len(y_baseline)} samples")
+
+    # 2. Split current data (80/20) - use 20% for testing
+    if len(current_data_df) < 200:
+        raise ValueError(
+            f"Insufficient current data: {len(current_data_df)} samples < 200 minimum. "
+            "Need at least 200 samples for reliable 80/20 split."
+        )
+
+    print(f"\n📊 Splitting current data (n={len(current_data_df)})...")
+    test_current = current_data_df.sample(frac=0.2, random_state=42)
+    train_current = current_data_df.drop(test_current.index)
+    print(f"   - Train portion (80%): {len(train_current)} samples")
+    print(f"   - Test portion (20%): {len(test_current)} samples")
+
+    # Prepare test_current for evaluation
+    # Save to temp file for load_and_clean_data to work
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".csv", delete=False) as f:
+        test_current.to_csv(f.name, index=False, sep=";")
+        temp_path = f.name
+
+    X_current, y_current = load_and_clean_data(temp_path)
+    os.remove(temp_path)
+
+    # 3. Evaluate on baseline (check for regression)
+    print("\n📍 Evaluating on test_baseline...")
+    y_pred_baseline = model.predict(X_baseline)
+
+    # Handle NN predictions (flatten if needed)
+    if hasattr(y_pred_baseline, "flatten"):
+        y_pred_baseline = y_pred_baseline.flatten()
+
+    metrics_baseline = {
+        "rmse": float(np.sqrt(mean_squared_error(y_baseline, y_pred_baseline))),
+        "r2": float(r2_score(y_baseline, y_pred_baseline)),
+        "mae": float(mean_absolute_error(y_baseline, y_pred_baseline)),
+    }
+
+    # 4. Evaluate on current (check for improvement)
+    print("🆕 Evaluating on test_current...")
+    y_pred_current = model.predict(X_current)
+
+    # Handle NN predictions (flatten if needed)
+    if hasattr(y_pred_current, "flatten"):
+        y_pred_current = y_pred_current.flatten()
+
+    metrics_current = {
+        "rmse": float(np.sqrt(mean_squared_error(y_current, y_pred_current))),
+        "r2": float(r2_score(y_current, y_pred_current)),
+        "mae": float(mean_absolute_error(y_current, y_pred_current)),
+    }
+
+    # 5. Check for baseline regression
+    BASELINE_R2_THRESHOLD = 0.60  # Minimum acceptable R² on baseline
+    baseline_regression = metrics_baseline["r2"] < BASELINE_R2_THRESHOLD
+
+    # Print summary
+    print(f"\n{'='*60}")
+    print("📊 DOUBLE EVALUATION RESULTS")
+    print(f"{'='*60}")
+    print(f"📍 Test Baseline (fixed reference, n={len(y_baseline)}):")
+    print(f"   - RMSE: {metrics_baseline['rmse']:.2f}")
+    print(f"   - MAE:  {metrics_baseline['mae']:.2f}")
+    print(f"   - R²:   {metrics_baseline['r2']:.4f}")
+    print(f"\n🆕 Test Current (new distribution, n={len(y_current)}):")
+    print(f"   - RMSE: {metrics_current['rmse']:.2f}")
+    print(f"   - MAE:  {metrics_current['mae']:.2f}")
+    print(f"   - R²:   {metrics_current['r2']:.4f}")
+    print(
+        f"\n{'🚨 REGRESSION DETECTED' if baseline_regression else '✅ No regression on baseline'}"
+    )
+    print(f"   Threshold: R² >= {BASELINE_R2_THRESHOLD}")
+    print(f"{'='*60}\n")
+
+    return {
+        "metrics_baseline": metrics_baseline,
+        "metrics_current": metrics_current,
+        "baseline_regression": baseline_regression,
+        "test_current_size": len(y_current),
+        "test_baseline_size": len(y_baseline),
+        "train_current_data": train_current,  # Return 80% for augmented training
+    }
+
+
 def update_model_summary(
     model_type: str,
     run_id: str,
@@ -136,7 +277,21 @@ def update_model_summary(
     )
 
 
-def train_rf(X, y, env, test_mode, data_source="reference"):
+def train_rf(X, y, env, test_mode, data_source="reference", current_data_df=None):
+    """
+    Train RandomForest model with optional double evaluation.
+
+    Args:
+        X: Training features
+        y: Training target
+        env: "dev" or "prod"
+        test_mode: bool
+        data_source: "reference", "current", or "baseline"
+        current_data_df: Optional DataFrame for double evaluation (requires >= 200 samples)
+
+    Returns:
+        dict with metrics and optionally double evaluation results
+    """
     y = y.to_numpy()
     run_name = f"RandomForest_Train_{env}" + ("_TEST" if test_mode else "")
     print("📡 Tracking URI :", mlflow.get_tracking_uri())
@@ -153,6 +308,11 @@ def train_rf(X, y, env, test_mode, data_source="reference"):
         mlflow.log_metric("test_mode", int(test_mode))
         mlflow.sklearn.autolog(disable=True)
 
+        # Tag if double evaluation enabled
+        if current_data_df is not None:
+            mlflow.set_tag("double_evaluation", True)
+            mlflow.log_metric("current_data_size", len(current_data_df))
+
         rf = RFPipeline()
         rf.fit(X, y)
 
@@ -167,6 +327,50 @@ def train_rf(X, y, env, test_mode, data_source="reference"):
         mlflow.log_metric("rf_r2_train", r2)
 
         print(f"🎯 RF – RMSE : {rmse:.2f} | R² : {r2:.4f}")
+
+        # NEW: Double evaluation if current_data provided
+        double_eval_results = None
+        if current_data_df is not None and len(current_data_df) >= 200:
+            try:
+                test_baseline_path = get_test_baseline_path(env)
+                double_eval_results = evaluate_double(
+                    model=rf,
+                    test_baseline_path=test_baseline_path,
+                    current_data_df=current_data_df,
+                    model_type="rf",
+                )
+
+                # Log double metrics to MLflow
+                mlflow.log_metrics(
+                    {
+                        "baseline_rmse": double_eval_results["metrics_baseline"][
+                            "rmse"
+                        ],
+                        "baseline_r2": double_eval_results["metrics_baseline"]["r2"],
+                        "baseline_mae": double_eval_results["metrics_baseline"]["mae"],
+                        "current_rmse": double_eval_results["metrics_current"]["rmse"],
+                        "current_r2": double_eval_results["metrics_current"]["r2"],
+                        "current_mae": double_eval_results["metrics_current"]["mae"],
+                        "baseline_regression": int(
+                            double_eval_results["baseline_regression"]
+                        ),
+                        "test_baseline_size": double_eval_results["test_baseline_size"],
+                        "test_current_size": double_eval_results["test_current_size"],
+                    }
+                )
+
+                print("✅ Double evaluation metrics logged to MLflow")
+
+            except Exception as e:
+                print(f"⚠️ Double evaluation failed: {e}")
+                import traceback
+
+                print(traceback.format_exc())
+                # Continue without double eval - don't fail the training
+        elif current_data_df is not None and len(current_data_df) < 200:
+            print(
+                f"⚠️ Current data too small for double evaluation: {len(current_data_df)} < 200 samples"
+            )
 
         # Save model to temporary directory for MLflow upload
         import tempfile
@@ -207,16 +411,44 @@ def train_rf(X, y, env, test_mode, data_source="reference"):
 
         print(f"✅ Modèle RF logged to MLflow + sauvegardé dans : {model_dir}")
 
-    # Return metrics + real run id and model uri
-    return {
+    # Return metrics + real run id and model uri + double eval results
+    result = {
         "rmse": rmse,
         "r2": r2,
         "run_id": run.info.run_id,
         "model_uri": artifact_uri,
     }
 
+    # Add double evaluation results if available
+    if double_eval_results:
+        result.update(
+            {
+                "metrics_baseline": double_eval_results["metrics_baseline"],
+                "metrics_current": double_eval_results["metrics_current"],
+                "baseline_regression": double_eval_results["baseline_regression"],
+                "test_current_size": double_eval_results["test_current_size"],
+                "test_baseline_size": double_eval_results["test_baseline_size"],
+            }
+        )
 
-def train_nn(X, y, env, test_mode):
+    return result
+
+
+def train_nn(X, y, env, test_mode, data_source="reference", current_data_df=None):
+    """
+    Train Neural Network model with optional double evaluation.
+
+    Args:
+        X: Training features
+        y: Training target
+        env: "dev" or "prod"
+        test_mode: bool
+        data_source: "reference", "current", or "baseline"
+        current_data_df: Optional DataFrame for double evaluation (requires >= 200 samples)
+
+    Returns:
+        dict with metrics and optionally double evaluation results
+    """
     y = y.to_numpy(dtype="float32")
     run_name = f"NeuralNet_Train_{env}" + ("_TEST" if test_mode else "")
 
@@ -224,8 +456,14 @@ def train_nn(X, y, env, test_mode):
         run = mlflow.active_run()
         mlflow.set_tag("mode", env)
         mlflow.set_tag("test_mode", test_mode)
+        mlflow.set_tag("data_source", data_source)
         mlflow.log_metric("test_mode", int(test_mode))
         mlflow.tensorflow.autolog(disable=True)
+
+        # Tag if double evaluation enabled
+        if current_data_df is not None:
+            mlflow.set_tag("double_evaluation", True)
+            mlflow.log_metric("current_data_size", len(current_data_df))
 
         nn = NNPipeline()
         epochs = 50
@@ -247,6 +485,50 @@ def train_nn(X, y, env, test_mode):
         mlflow.log_metric("nn_r2_train", r2)
 
         print(f"🎯 NN – RMSE : {rmse:.2f} | R² : {r2:.4f} | Params: {total_params}")
+
+        # NEW: Double evaluation if current_data provided
+        double_eval_results = None
+        if current_data_df is not None and len(current_data_df) >= 200:
+            try:
+                test_baseline_path = get_test_baseline_path(env)
+                double_eval_results = evaluate_double(
+                    model=nn,
+                    test_baseline_path=test_baseline_path,
+                    current_data_df=current_data_df,
+                    model_type="nn",
+                )
+
+                # Log double metrics to MLflow
+                mlflow.log_metrics(
+                    {
+                        "baseline_rmse": double_eval_results["metrics_baseline"][
+                            "rmse"
+                        ],
+                        "baseline_r2": double_eval_results["metrics_baseline"]["r2"],
+                        "baseline_mae": double_eval_results["metrics_baseline"]["mae"],
+                        "current_rmse": double_eval_results["metrics_current"]["rmse"],
+                        "current_r2": double_eval_results["metrics_current"]["r2"],
+                        "current_mae": double_eval_results["metrics_current"]["mae"],
+                        "baseline_regression": int(
+                            double_eval_results["baseline_regression"]
+                        ),
+                        "test_baseline_size": double_eval_results["test_baseline_size"],
+                        "test_current_size": double_eval_results["test_current_size"],
+                    }
+                )
+
+                print("✅ Double evaluation metrics logged to MLflow")
+
+            except Exception as e:
+                print(f"⚠️ Double evaluation failed: {e}")
+                import traceback
+
+                print(traceback.format_exc())
+                # Continue without double eval - don't fail the training
+        elif current_data_df is not None and len(current_data_df) < 200:
+            print(
+                f"⚠️ Current data too small for double evaluation: {len(current_data_df)} < 200 samples"
+            )
 
         # Save model to temporary directory for MLflow upload
         import tempfile
@@ -280,13 +562,27 @@ def train_nn(X, y, env, test_mode):
 
         print("✅ Modèle NN logged to MLflow (artifacts uploaded to GCS)")
 
-    # Return metrics + real run id and model uri
-    return {
+    # Return metrics + real run id and model uri + double eval results
+    result = {
         "rmse": rmse,
         "r2": r2,
         "run_id": run.info.run_id,
         "model_uri": artifact_uri,
     }
+
+    # Add double evaluation results if available
+    if double_eval_results:
+        result.update(
+            {
+                "metrics_baseline": double_eval_results["metrics_baseline"],
+                "metrics_current": double_eval_results["metrics_current"],
+                "baseline_regression": double_eval_results["baseline_regression"],
+                "test_current_size": double_eval_results["test_current_size"],
+                "test_baseline_size": double_eval_results["test_baseline_size"],
+            }
+        )
+
+    return result
 
 
 def train_rfc(X_raw, y_unused, env, test_mode):
@@ -379,6 +675,7 @@ def train_model(
     env: str = "dev",  # Aligned with CLI default
     hyperparams: dict = None,
     test_mode: bool = False,
+    current_data_df: pd.DataFrame = None,  # NEW: For double evaluation
 ):
     """
     Train a single model and return results.
@@ -389,9 +686,10 @@ def train_model(
         env: "dev" or "prod" (default: "dev")
         hyperparams: dict of hyperparameters (optional)
         test_mode: if True, use small sample (1000 rows) for fast testing
+        current_data_df: Optional current data for double evaluation (>= 200 samples)
 
     Returns:
-        dict with run_id, metrics, model_uri
+        dict with run_id, metrics, model_uri, and optionally double evaluation results
     """
     # Map data_source to file path
     if test_mode:
@@ -427,21 +725,33 @@ def train_model(
     print(f"✅ Data loaded: {X.shape[0]} rows")
 
     if model_type == "rf":
-        # TODO: Use hyperparams if provided
-        metrics = train_rf(X, y, env, test_mode, data_source)
+        # Pass current_data_df for double evaluation
+        metrics = train_rf(
+            X, y, env, test_mode, data_source, current_data_df=current_data_df
+        )
         return {
             "run_id": metrics.get("run_id"),
             "metrics": {k: metrics[k] for k in ("rmse", "r2") if k in metrics},
             "model_uri": metrics.get("model_uri"),
+            # NEW: Double evaluation results
+            "metrics_baseline": metrics.get("metrics_baseline"),
+            "metrics_current": metrics.get("metrics_current"),
+            "baseline_regression": metrics.get("baseline_regression", False),
         }
 
     elif model_type == "nn":
-        # TODO: Use hyperparams if provided
-        metrics = train_nn(X, y, env, test_mode)
+        # Pass current_data_df for double evaluation
+        metrics = train_nn(
+            X, y, env, test_mode, data_source, current_data_df=current_data_df
+        )
         return {
             "run_id": metrics.get("run_id"),
             "metrics": {k: metrics[k] for k in ("rmse", "r2") if k in metrics},
             "model_uri": metrics.get("model_uri"),
+            # NEW: Double evaluation results
+            "metrics_baseline": metrics.get("metrics_baseline"),
+            "metrics_current": metrics.get("metrics_current"),
+            "baseline_regression": metrics.get("baseline_regression", False),
         }
 
     elif model_type == "rf_class":
