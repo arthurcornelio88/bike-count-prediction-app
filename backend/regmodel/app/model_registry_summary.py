@@ -1,7 +1,6 @@
 import os
 import json
 import uuid
-import subprocess
 import tempfile
 from typing import Optional
 import datetime
@@ -55,33 +54,56 @@ def update_summary(
     )
     summary = []
 
-    # Télécharger ou charger si existant - utiliser subprocess au lieu de os.system
+    # Télécharger ou charger si existant - utiliser Google Cloud Storage client
     if summary_path.startswith("gs://"):
-        subprocess.run(  # noqa: S603
-            ["gsutil", "cp", summary_path, summary_path_local],
-            check=False,  # Continue même si le fichier n'existe pas
-            capture_output=True,
-        )
-        # Créer le fichier s'il n'existe pas
-        if not os.path.exists(summary_path_local):
-            open(summary_path_local, "a").close()  # noqa: S603,PTH123
-    if os.path.exists(summary_path_local):
-        with open(summary_path_local, "r") as f:
-            try:
-                summary = json.load(f)
-            except json.JSONDecodeError:
-                print("⚠️ summary.json vide ou corrompu. Réinitialisation.")
+        try:
+            # Download existing summary from GCS
+            bucket_name, blob_path = summary_path.replace("gs://", "").split("/", 1)
+            client = storage.Client()
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob(blob_path)
+
+            if blob.exists():
+                summary_content = blob.download_as_text()
+                try:
+                    summary = json.loads(summary_content)
+                except json.JSONDecodeError:
+                    print("⚠️ summary.json vide ou corrompu. Réinitialisation.")
+                    summary = []
+            else:
+                print("ℹ️ summary.json n'existe pas encore dans GCS, création...")
                 summary = []
+        except Exception as e:
+            print(f"⚠️ Erreur lors du téléchargement de summary.json : {e}")
+            summary = []
+    else:
+        # Local file
+        if os.path.exists(summary_path_local):
+            with open(summary_path_local, "r") as f:
+                try:
+                    summary = json.load(f)
+                except json.JSONDecodeError:
+                    print("⚠️ summary.json vide ou corrompu. Réinitialisation.")
+                    summary = []
+        else:
+            summary = []
 
     summary.append(entry)
 
-    with open(summary_path_local, "w") as f:
-        json.dump(summary, f, indent=2)
-
     if summary_path.startswith("gs://"):
-        subprocess.run(["gsutil", "cp", summary_path_local, summary_path], check=True)  # noqa: S603
+        # Upload to GCS
+        bucket_name, blob_path = summary_path.replace("gs://", "").split("/", 1)
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_path)
+        blob.upload_from_string(
+            json.dumps(summary, indent=2), content_type="application/json"
+        )
         print(f"✅ summary.json mis à jour et uploadé vers {summary_path}")
     else:
+        # Save locally
+        with open(summary_path_local, "w") as f:
+            json.dump(summary, f, indent=2)
         print(f"✅ summary.json mis à jour localement : {summary_path}")
 
 
