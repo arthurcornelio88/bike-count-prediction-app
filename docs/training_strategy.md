@@ -475,3 +475,158 @@ export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
 - [bigquery_setup.md](./bigquery_setup.md) — Production data pipeline
 - [dvc.md](./dvc.md) — Data versioning strategy
 - [MLOPS_ROADMAP.md](../MLOPS_ROADMAP.md) — Overall MLOps architecture
+
+---
+
+## Double Test Set Evaluation Strategy
+
+**Added**: 2025-11-02
+**Status**: ✅ Implemented and Tested
+
+### Overview
+
+The **double test set evaluation strategy** enhances deployment decisions by evaluating models on two test sets:
+
+1. **test_baseline**: Fixed reference test set (132K samples, 20% of train_baseline.csv)
+   - Detects model regression (performance drop on known data)
+   - Threshold: R² >= 0.60
+
+2. **test_current**: Dynamic test set (20% of current production data)
+   - Evaluates performance on new data distribution
+   - Used to compare against production model
+
+This approach is based on the paper "Hidden Technical Debt in Machine Learning Systems" (Sculley et al., NIPS 2015).
+
+### Decision Logic
+
+```python
+BASELINE_R2_THRESHOLD = 0.60
+
+if metrics_baseline["r2"] < BASELINE_R2_THRESHOLD:
+    decision = "reject_regression"
+    # Model regressed on baseline - DO NOT DEPLOY
+
+elif metrics_current["r2"] > production_model_r2:
+    decision = "deploy"
+    # Model improved on current distribution - DEPLOY
+
+else:
+    decision = "skip_no_improvement"
+    # No improvement on current distribution - KEEP CURRENT MODEL
+```
+
+### Usage Examples
+
+#### Via API (Manual Testing)
+
+```python
+import pandas as pd
+import numpy as np
+import requests
+
+# Prepare 200+ samples from BigQuery or CSV
+df_current = pd.read_csv('your_data.csv', sep=';').sample(n=200)
+
+# Clean for JSON serialization
+df_current = df_current.replace([np.inf, -np.inf], np.nan)
+for col in df_current.columns:
+    if df_current[col].dtype in ['float64', 'int64']:
+        df_current[col] = df_current[col].fillna(0)
+    else:
+        df_current[col] = df_current[col].fillna('')
+
+# Call API with double evaluation
+payload = {
+    "model_type": "rf",
+    "data_source": "baseline",  # Use full train_baseline.csv
+    "env": "dev",
+    "current_data": df_current.to_dict(orient='records'),
+    "test_mode": False
+}
+
+response = requests.post(
+    "http://localhost:8000/train",
+    json=payload,
+    timeout=600
+)
+
+result = response.json()
+print(f"Double eval enabled: {result['double_evaluation_enabled']}")
+print(f"Baseline R²: {result['metrics_baseline']['r2']}")
+print(f"Current R²: {result['metrics_current']['r2']}")
+print(f"Regression detected: {result['baseline_regression']}")
+```
+
+#### Via Airflow DAG (Automated)
+
+The `monitor_and_fine_tune` DAG automatically uses double evaluation:
+
+```bash
+# Trigger manually
+docker exec airflow-webserver airflow dags trigger monitor_and_fine_tune
+
+# Or wait for weekly schedule (@weekly - Sunday 00:00)
+```
+
+**DAG Flow with Double Evaluation:**
+
+1. Monitor → Detect drift using Evidently
+2. Validate → Check production model (RMSE threshold: 50)
+3. Decide → If RMSE > 50, trigger fine-tuning
+4. Fine-tune:
+   - Fetch last 30 days from BigQuery (limit 2000 rows)
+   - Train on train_baseline.csv (660K samples)
+   - Evaluate on test_baseline + test_current (20% of fetched data)
+5. Decision → Deploy/Reject/Skip based on double metrics
+6. Audit → Log all metrics to BigQuery `monitoring_audit.logs`
+
+### Test Results (2025-11-02)
+
+**Test Scenario**: Small sample training to verify regression detection
+
+| Metric | Training (964 rows) | test_baseline (132K) | test_current (38) |
+|--------|---------------------|----------------------|-------------------|
+| RMSE   | 35.90               | 317.10               | 36.01             |
+| MAE    | -                   | 53.68                | 21.85             |
+| R²     | 0.882               | **0.051** 🚨         | 0.854             |
+
+**Decision**: ❌ REJECT (baseline_regression=True)
+
+**Analysis**:
+
+- Model fit training data well (R² = 0.88)
+- Model performed well on current test set (R² = 0.85)
+- **BUT model catastrophically failed on baseline** (R² = 0.05)
+- Double evaluation **correctly detected regression** and rejected deployment
+- This proves the model doesn't generalize beyond the small sample
+
+### Expected Production Results
+
+With `data_source="baseline"` (660K samples for training):
+
+- Training time: ~2-5 minutes
+- Baseline R² should be > 0.60 (no regression)
+- Current R² comparison determines deployment
+- Typical baseline R²: 0.75-0.85 (based on previous runs)
+
+### Benefits
+
+1. **Prevents Regression**: Catches models that fit new data but lose generalization
+2. **Data Distribution Shifts**: Detects when new data distribution differs significantly
+3. **Intelligent Deployment**: Deploys only when both criteria are met (no regression + improvement)
+4. **Audit Trail**: All decisions logged with full metrics to BigQuery
+
+### Monitoring & Logs
+
+- **MLflow runs**: <http://localhost:5000> (includes all double evaluation metrics)
+- **BigQuery audit**: `monitoring_audit.logs` table (decision, baseline_regression, r2_baseline, r2_current)
+- **Drift reports**: `gs://df_traffic_cyclist1/drift_reports/` (Evidently HTML reports)
+
+### Implementation Files
+
+- **Training logic**: `backend/regmodel/app/train.py`
+  - `get_test_baseline_path()`: Environment-aware path resolution
+  - `evaluate_double()`: Double evaluation implementation
+  - `train_rf()`, `train_nn()`: Training with optional double eval
+- **API endpoint**: `backend/regmodel/app/fastapi_app.py` - `/train`
+- **DAG orchestration**: `dags/dag_monitor_and_train.py` - `fine_tune_model()`
