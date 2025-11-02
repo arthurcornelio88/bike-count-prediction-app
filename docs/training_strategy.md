@@ -1,86 +1,138 @@
-# 🎯 Training Strategy — Hybrid Architecture
+# Training Strategy — Champion Model + Intelligent Retraining
 
-**Last Updated**: 2025-10-12
-
----
-
-## Overview
-
-This document explains the **hybrid training strategy** for the bike traffic prediction models:
-**champion models trained locally** on large historical datasets, **fine-tuned weekly in production**
-on recent data to adapt to evolving patterns.
-
-### Why Hybrid?
-
-| Aspect | Local Champion | Production Fine-Tuning |
-|--------|----------------|------------------------|
-| **Purpose** | High-quality baseline | Adapt to recent patterns |
-| **Data** | 724k historical records | Last 30 days (~2k records) |
-| **Frequency** | Quarterly (or on-demand) | Weekly (if drift detected) |
-| **Duration** | 15-30 minutes | 5-10 minutes |
-| **Cost** | Free (local GPU) | Low (Cloud Run) |
-| **Control** | Full experimentation | Automated via Airflow |
+**Last Updated**: 2025-11-02
 
 ---
 
-## Training Workflow
+## Quick Start
 
-### Phase 1: Champion Training (Local Development)
+| Task | Command |
+|------|---------|
+| **Train champion locally** | `python backend/regmodel/app/train.py --model-type rf --data-source baseline --env dev` |
+| **Quick test (1K samples)** | `python backend/regmodel/app/train.py --model-type rf --data-source baseline --model-test --env dev` |
+| **Trigger weekly fine-tuning** | `docker exec airflow-webserver airflow dags trigger monitor_and_fine_tune` |
+| **View MLflow experiments** | <http://localhost:5000> |
+| **Check audit logs** | BigQuery table: `monitoring_audit.logs` |
 
-**When:** Initial setup, quarterly refresh, or after major architecture changes
-
-**Objective:** Create the best possible baseline model on comprehensive historical data
-
-#### 1.1 Data Preparation
+**Required Environment Variables:**
 
 ```bash
-# Baseline datasets already uploaded to GCS
-TRAIN_DATA_PATH=gs://df_traffic_cyclist1/data/train_baseline.csv  # 724k rows
-TEST_DATA_PATH=gs://df_traffic_cyclist1/data/test_baseline.csv    # 181k rows
-
-# These are referenced via environment variables in training
 export TRAIN_DATA_PATH=gs://df_traffic_cyclist1/data/train_baseline.csv
 export TEST_DATA_PATH=gs://df_traffic_cyclist1/data/test_baseline.csv
+export GOOGLE_APPLICATION_CREDENTIALS=./mlflow-trainer.json
 ```
 
-#### 1.2 Training Commands
+---
 
-**Basic Champion Training:**
+## Overview & Philosophy
+
+The bike traffic prediction system uses a **champion model architecture** with intelligent retraining:
+
+- **Champion models** are trained locally on comprehensive historical data (660K records)
+- **Weekly fine-tuning** adapts models to recent patterns when drift is detected
+- **Double test set evaluation** ensures models improve on new data without regressing on baseline performance
+- **Quarterly retraining** incorporates accumulated production data into new baselines
+
+### Core Principles
+
+| Principle | Implementation |
+|-----------|---------------|
+| **Quality First** | Train champions on large datasets with full control |
+| **Adaptive** | Weekly fine-tuning responds to distribution shifts |
+| **Rigorous Evaluation** | Double test sets prevent both regression and overfitting |
+| **Cost-Effective** | Local training (free GPU) + lightweight cloud fine-tuning |
+| **Auditable** | Full lineage via MLflow + BigQuery audit logs |
+
+---
+
+## Double Test Set Evaluation
+
+**Status**: Core feature (implemented 2025-11-02)
+
+### Why Two Test Sets?
+
+Double evaluation prevents deploying models that fit new data but lose generalization capability
+(based on Sculley et al., "Hidden Technical Debt in Machine Learning Systems", NIPS 2015).
+
+| Test Set | Purpose | Size | Threshold |
+|----------|---------|------|-----------|
+| **test_baseline** | Detect regression on known data | 132K samples (fixed) | R² >= 0.60 |
+| **test_current** | Evaluate on new distribution | 20% of production data | Must improve vs. current champion |
+
+### Decision Logic
+
+```python
+BASELINE_R2_THRESHOLD = 0.60
+
+if metrics_baseline["r2"] < BASELINE_R2_THRESHOLD:
+    decision = "reject_regression"
+    # Model regressed - DO NOT DEPLOY
+
+elif metrics_current["r2"] > production_model_r2:
+    decision = "deploy"
+    # Model improved - DEPLOY
+
+else:
+    decision = "skip_no_improvement"
+    # No improvement - KEEP CURRENT MODEL
+```
+
+### Example Results
+
+**Test case**: Intentional small-sample training to verify regression detection
+
+| Metric | Training (964 rows) | test_baseline (132K) | test_current (38) | Decision |
+|--------|---------------------|----------------------|-------------------|----------|
+| RMSE   | 35.90               | 317.10               | 36.01             | Reject   |
+| R²     | 0.882               | **0.051** 🚨         | 0.854             | ❌ Regression detected |
+
+**Analysis**: Model fit training and current data well, but catastrophically failed on baseline.
+Double evaluation correctly rejected deployment.
+
+**Expected with full data** (`data_source="baseline"`, 660K samples):
+
+- Baseline R²: 0.75-0.85 (no regression)
+- Current R²: Compared against production champion
+- Training time: 2-5 minutes
+
+---
+
+## Champion Training (Local)
+
+**When**: Initial setup, quarterly refresh, major architecture changes
+
+**Objective**: Create best possible baseline model on comprehensive historical data
+
+### Data Sources
 
 ```bash
-# Train RandomForest champion on baseline data
+# Baseline datasets on GCS
+TRAIN_DATA_PATH=gs://df_traffic_cyclist1/data/train_baseline.csv  # 660K rows
+TEST_DATA_PATH=gs://df_traffic_cyclist1/data/test_baseline.csv    # 132K rows
+```
+
+### Training Commands
+
+**Basic champion training:**
+
+```bash
+# RandomForest champion
 python backend/regmodel/app/train.py \
     --model-type rf \
     --data-source baseline \
     --env dev
 
-# Train Neural Network champion
+# Neural Network champion
 python backend/regmodel/app/train.py \
     --model-type nn \
     --data-source baseline \
     --env dev
 ```
 
-**CLI Parameters:**
-
-- `--model-type`: Model architecture
-  - `rf` — RandomForest (n_estimators=50, max_depth=20)
-  - `nn` — Neural Network (embedding + dense layers)
-  - `rf_class` — Binary classifier (high/low traffic)
-- `--data-source`: Training data origin
-  - `baseline` — Use train_baseline.csv from GCS (724k rows) ✅ **Recommended**
-  - `reference` — Legacy reference_data.csv
-  - `current` — Current production data snapshot
-- `--env`: Environment mode
-  - `dev` — Local development (default)
-  - `prod` — Production mode
-  - **Note:** Both modes upload everything to GCS (artifacts + metadata via MLflow)
-- `--model-test`: Quick test mode (1000 rows sample for debugging)
-
-**Quick Test Training:**
+**Quick test (debugging):**
 
 ```bash
-# Fast iteration during development (~10 seconds)
+# Fast iteration on 1K sample (~10 seconds)
 python backend/regmodel/app/train.py \
     --model-type rf \
     --data-source baseline \
@@ -88,73 +140,99 @@ python backend/regmodel/app/train.py \
     --env dev
 ```
 
-#### 1.3 What Happens During Training
+### CLI Parameters
 
-1. **Setup:** Loads GCS credentials (`mlflow-trainer.json` for artifact upload)
-2. **Data Loading:** Reads from `$TRAIN_DATA_PATH` (GCS or local fallback)
-3. **Training:** Fits custom pipeline (cleaning → feature engineering → model)
+| Parameter | Options | Description |
+|-----------|---------|-------------|
+| `--model-type` | `rf`, `nn`, `rf_class` | Model architecture (RandomForest, Neural Net, Classifier) |
+| `--data-source` | `baseline`, `current`, `reference` | Training data origin (baseline recommended) |
+| `--env` | `dev`, `prod` | Environment mode (both upload to GCS) |
+| `--model-test` | flag | Quick test mode (1K sample) |
+
+### Training Pipeline Steps
+
+1. **Setup**: Load GCS credentials (`mlflow-trainer.json`)
+2. **Data Loading**: Read from `$TRAIN_DATA_PATH` (GCS or local fallback)
+3. **Training**: Fit custom pipeline (cleaning → feature engineering → model)
 
    ![Training Pipeline NN](img/nn_train.png)
-
    *Figure 1: Neural Network training pipeline with custom transformers*
 
-4. **Evaluation:** Computes metrics on training set (RMSE, R²)
-5. **MLflow Logging:**
+4. **Double Evaluation**:
+   - Evaluate on **test_baseline.csv** (detect regression)
+   - Evaluate on **test_current** (if provided, assess new distribution)
+5. **MLflow Logging**:
+   - Metadata → Cloud SQL PostgreSQL (experiments, runs, metrics)
+   - Model registered in MLflow Registry (`bike-traffic-rf` version X)
 
-- Metadata uploaded to Cloud SQL PostgreSQL (experiments, runs, metrics)
-- Model registered in MLflow Registry (`bike-traffic-rf` version X)
+   ![MLflow UI Tracking](img/nn_mlflow.png)
+   *Figure 2: MLflow UI showing experiment tracking and metrics*
 
-  ![MLflow UI Tracking](img/nn_mlflow.png)
+   - Artifacts → `gs://df_traffic_cyclist1/mlflow-artifacts/{run_id}/`
 
-  *Figure 2: MLflow UI showing experiment tracking and metrics*
+   ![MLflow Artifacts View](img/artifacts_mlflow_nn.png)
+   *Figure 3: MLflow artifact storage (cleaner, model, OHE, preprocessor)*
 
-- Artifacts uploaded to `gs://df_traffic_cyclist1/mlflow-artifacts/{run_id}/`
+6. **GCS Artifact Storage**:
 
-  ![MLflow Artifacts View](img/artifacts_mlflow_nn.png)
+   ```text
+   gs://df_traffic_cyclist1/
+   ├── mlflow-artifacts/{experiment_id}/{run_id}/artifacts/model/
+   └── models/summary.json
+   ```
 
-  *Figure 3: MLflow artifact storage showing model components (cleaner, model, OHE, preprocessor)*
+   ![GCS Artifact Storage](img/artifacts_gcs_nn.png)
+   *Figure 4: GCS bucket structure with MLflow artifacts*
 
-6. **GCS Artifact Bucket (what's stored where)**
+7. **Summary Update**: `summary.json` appended with run metadata for Airflow
 
-- Top-level buckets
-  - `gs://df_traffic_cyclist1/mlflow-artifacts/` — MLflow artifacts (per-experiment, per-run folders)
-  - `gs://df_traffic_cyclist1/models/` — exported model bundles and `summary.json`
+   ![Summary JSON](img/summary_json_example.png)
+   *Figure 5: Example summary.json entry (timestamp, model_type, run_id, metrics)*
 
-- Typical artifact layout:
+### Expected Metrics (Baseline Data)
 
-    gs://df_traffic_cyclist1/mlflow-artifacts/{experiment_id}/{run_id}/artifacts/model/
-
-  ![GCS Artifact Storage](img/artifacts_gcs_nn.png)
-
-  *Figure 4: GCS bucket structure with MLflow artifacts and model files*
-
-7. **Summary Update:** `gs://df_traffic_cyclist1/models/summary.json` updated with run info for Airflow
-
-- The `summary.json` file is appended with a new entry after each training run. It contains metadata
-    used by Airflow to select and download candidate models for promotion.
-
-- Example entry snapshot:
-
-    ![Summary JSON](img/summary_json_example.png)
-
-    *Figure 5: Example `summary.json` entry (timestamp, model_type, run_id, model_uri, metrics)*
-
-#### 1.4 Expected Metrics (Baseline Data)
-
-- **RandomForest:** RMSE ~47, R² ~0.79
-- **Neural Network:** RMSE ~54, R² ~0.72
+| Model | RMSE | R² |
+|-------|------|-----|
+| **RandomForest** | ~47 | ~0.79 |
+| **Neural Network** | ~54 | ~0.72 |
 
 ---
 
-### Phase 2: Production Fine-Tuning (Automated Weekly)
+## Production Fine-Tuning (Automated)
 
-**When:** Every week via `dag_monitor_and_train.py` if drift is detected
+**When**: Weekly via `dag_monitor_and_train.py` if drift detected
 
-**Objective:** Adapt champion model to recent patterns without full retraining
+**Objective**: Adapt champion to recent patterns without full retraining
 
-#### 2.1 Fine-Tuning via API
+### Airflow DAG Workflow
 
-The Airflow DAG calls the `/train` API endpoint with recent data:
+```mermaid
+graph LR
+    A[Monitor Drift] --> B{Drift Detected?}
+    B -->|No| C[End]
+    B -->|Yes| D[Validate Champion]
+    D --> E{RMSE > 50?}
+    E -->|No| C
+    E -->|Yes| F[Fetch Last 30 Days]
+    F --> G[Fine-Tune on Baseline]
+    G --> H[Double Evaluation]
+    H --> I{Decision}
+    I -->|Deploy| J[Promote to Production]
+    I -->|Reject| K[Keep Current]
+    I -->|Skip| K
+    J --> L[Log to Audit]
+    K --> L
+```
+
+**Trigger manually:**
+
+```bash
+docker exec airflow-webserver airflow dags trigger monitor_and_fine_tune
+```
+
+**Schedule**: @weekly (Sunday 00:00)
+
+### API Fine-Tuning Call
 
 ```python
 # dag_monitor_and_train.py
@@ -162,9 +240,10 @@ response = requests.post(
     f"{REGMODEL_API_URL}/train",
     json={
         "model_type": "rf",
-        "data_source": "current",  # Last 30 days from BigQuery
+        "data_source": "baseline",  # Train on full baseline
+        "current_data": df_current.to_dict(orient='records'),  # Last 30 days
         "hyperparams": {
-            "learning_rate": 0.001,  # Lower than initial
+            "learning_rate": 0.001,  # Lower for fine-tuning
             "n_estimators": 50,
             "max_depth": 20
         },
@@ -174,51 +253,54 @@ response = requests.post(
 )
 ```
 
-**API Endpoint Parameters:**
-
-- `model_type` — Same as CLI (`rf`, `nn`, `rf_class`)
-- `data_source` — Source of training data
-- `hyperparams` — Optional model-specific parameters
-- `test_mode` — Boolean for quick testing
-
-#### 2.2 Champion/Challenger Evaluation
-
-The DAG compares the new model (challenger) against the current champion:
+### Double Evaluation in Production
 
 ```python
-# Evaluate on FIXED test set (test_baseline.csv from GCS)
-test_baseline = pd.read_csv(os.getenv("TEST_DATA_PATH"))
+# Automatic in DAG
+result = response.json()
 
-challenger_rmse = evaluate(challenger_model, test_baseline)
-champion_rmse = get_current_champion_rmse()
+# Check regression
+if result['baseline_regression']:
+    log_event("fine_tune_rejected", "baseline regression detected")
+    return
 
-# Promotion decision (5% improvement threshold)
-if challenger_rmse < champion_rmse * 0.95:
-    promote_to_production(challenger_model)
-    log_event("champion_promoted", challenger_rmse)
+# Check improvement
+if result['metrics_current']['r2'] > champion_r2:
+    promote_to_production(result['model_uri'])
+    log_event("champion_promoted", result['metrics_current'])
 else:
-    log_event("champion_kept", champion_rmse)
+    log_event("champion_kept", "no improvement on current distribution")
 ```
 
-**Why 5% threshold?** Prevents noise-driven model churn while allowing genuine improvements.
+### DAG Flow Details
+
+1. **Monitor**: Detect drift using Evidently
+2. **Validate**: Check champion RMSE (threshold: 50)
+3. **Decide**: If RMSE > 50, trigger fine-tuning
+4. **Fine-tune**:
+   - Fetch last 30 days from BigQuery (limit 2000 rows)
+   - Train on train_baseline.csv (660K samples)
+   - **Evaluate on test_baseline + test_current** (20% of fetched data)
+5. **Decision**: Deploy/Reject/Skip based on double metrics
+6. **Audit**: Log all metrics to BigQuery `monitoring_audit.logs`
 
 ---
 
-### Phase 3: Quarterly Retrain (Local)
+## Quarterly Retraining
 
-**When:** Every 3 months, or when performance degrades >20%
+**When**: Every 3 months, or when performance degrades >20%
 
-**Objective:** Incorporate accumulated production data into a new baseline
+**Objective**: Incorporate accumulated production data into new baseline
 
-#### 3.1 Data Aggregation
+### Data Aggregation
 
 ```bash
-# 1. Export 3 months of production data from BigQuery
+# 1. Export 3 months from BigQuery
 bq extract --destination_format=CSV \
   'datascientest-460618:bike_traffic_raw.daily_*' \
   gs://df_traffic_cyclist1/exports/bq_export_*.csv
 
-# 2. Download and merge with current baseline
+# 2. Download and merge
 gsutil -m cp gs://df_traffic_cyclist1/data/train_baseline.csv data/
 gsutil -m cp gs://df_traffic_cyclist1/exports/bq_export_*.csv data/exports/
 
@@ -228,22 +310,20 @@ python scripts/merge_baseline_bq.py \
     --output data/new_train_baseline.csv
 ```
 
-#### 3.2 Retrain from Scratch
+### Retrain from Scratch
 
 ```bash
-# Train on merged dataset
+# Train on merged dataset with double evaluation
 python backend/regmodel/app/train.py \
     --model-type rf \
     --data-source baseline \
     --env dev
 
-# Evaluate against SAME test_baseline.csv
-# If improved → upload as new baseline
-
+# If test_baseline metrics improved → upload as new baseline
 gsutil cp data/new_train_baseline.csv \
   gs://df_traffic_cyclist1/data/train_baseline.csv
 
-# Update environment variable reference
+# Update Secret Manager reference
 gcloud secrets versions add train-data-path \
   --data-file=- <<< "gs://df_traffic_cyclist1/data/train_baseline.csv"
 ```
@@ -252,9 +332,7 @@ gcloud secrets versions add train-data-path \
 
 ## MLflow Integration
 
-### Artifact Storage Architecture
-
-The training system uses **MLflow** for experiment tracking and model registry:
+### Architecture
 
 ```text
 ┌──────────────────┐        ┌─────────────────────┐
@@ -262,135 +340,79 @@ The training system uses **MLflow** for experiment tracking and model registry:
 │  (train.py)      │        │  localhost:5000     │
 └──────────────────┘        └─────────────────────┘
          │                            │
-         │ Artifacts ✅               │ Metadata ✅
+         │ Artifacts                  │ Metadata
          ↓                            ↓
 ┌──────────────────┐        ┌─────────────────────┐
 │  GCS Bucket      │        │  Cloud SQL          │
 │  mlflow-artifacts│        │  PostgreSQL         │
 └──────────────────┘        └─────────────────────┘
-                                      │
-                            datascientest-460618:europe-west3:mlflow-metadata
 ```
 
-**Key Components:**
+### Key Components
 
-1. **Backend Store** (metadata): ✅ **Cloud SQL PostgreSQL**
-   - Instance: `mlflow-metadata` (europe-west3)
-   - Database: `mlflow` (user: `mlflow_user`)
-   - Connection: Via Cloud SQL Proxy in docker-compose
-   - Benefits: Shared, persistent, scalable metadata storage
-2. **Artifact Store** (models): `gs://df_traffic_cyclist1/mlflow-artifacts/`
+| Component | Implementation | Details |
+|-----------|---------------|---------|
+| **Backend Store** | Cloud SQL PostgreSQL | Instance: `mlflow-metadata` (europe-west3) |
+| **Artifact Store** | GCS | `gs://df_traffic_cyclist1/mlflow-artifacts/` |
+| **Model Registry** | MLflow UI + summary.json | Human exploration + DAG automation |
 
-- ✅ All model files (joblib, weights) are stored on GCS.
-- ✅ Artifacts are accessible remotely with proper credentials.
-- ✅ This bucket contains the canonical model files — treat it as the source of truth.
+### Authentication
 
-3. **Model Registry**: MLflow UI + `summary.json` for Airflow
-   - MLflow UI: Rich versioning, lineage, comparison (metadata-driven)
-   - summary.json: Programmatic access for DAGs (artifact-driven, reliable)
+**Training Script (Client):**
 
-### Authentication Requirements
+- Service Account: `mlflow-trainer@datascientest-460618.iam.gserviceaccount.com`
+- Role: `roles/storage.objectAdmin`
+- Credentials: `./mlflow-trainer.json`
 
-**For Training Script (Client):**
-
-The training script (`train.py`) must authenticate to GCS before importing MLflow. This
-ensures artifact uploads succeed when the script runs. The code checks the
-`GOOGLE_APPLICATION_CREDENTIALS` environment variable and falls back to
-`./mlflow-trainer.json` when needed (this happens at module import time).
-
-**Service Account needed:** `mlflow-trainer@datascientest-460618.iam.gserviceaccount.com`
-with `roles/storage.objectAdmin` for GCS bucket access.
-
-**For MLflow Server (Docker):**
-
-The MLflow stack is configured in `docker-compose.yaml` with two service accounts:
+**MLflow Server (Docker):**
 
 1. **Cloud SQL Proxy** (`gcp.json`):
    - Service Account: `streamlit-models@datascientest-460618.iam.gserviceaccount.com`
-   - Role Required: `roles/cloudsql.client`
-   - Purpose: Connect to Cloud SQL PostgreSQL instance for metadata storage
+   - Role: `roles/cloudsql.client`
 
-2. **MLflow Server** (`mlflow-ui-access.json`):
+2. **MLflow UI** (`mlflow-ui-access.json`):
    - Service Account: `mlflow-ui-access@datascientest-460618.iam.gserviceaccount.com`
-   - Role Required: `roles/storage.objectViewer`
-   - Purpose: Read artifacts from GCS for UI display
+   - Role: `roles/storage.objectViewer`
 
-**Cloud SQL Backend:**
+See [mlflow_cloudsql.md](./mlflow_cloudsql.md) for complete setup details.
 
-- Instance: `mlflow-metadata` (europe-west3)
-- Database: `mlflow` (user: `mlflow_user`)
-- Connection: Via Cloud SQL Proxy on port 5432
-- Benefits: Centralized team tracking, persistent, scalable
-
-See [mlflow_cloudsql.md](./mlflow_cloudsql.md) for complete setup details and troubleshooting.
-
-### Model Registry (Dual System)
+### Dual Registry System
 
 **1. MLflow Registry** (Rich UI, versioning)
 
-- URL: <http://localhost:5000\>
+- URL: <http://localhost:5000>
 - Models: `bike-traffic-rf`, `bike-traffic-nn`
 - Features: Version history, artifact lineage, metric comparison
 
 **2. summary.json** (Airflow-compatible)
 
 - Path: `gs://df_traffic_cyclist1/models/summary.json`
-- Updated for **ALL** training runs (dev + prod)
-- Structure:
+- Updated for ALL training runs (dev + prod)
 
 ```json
 {
-  "timestamp": "2025-10-12T15:37:11",
+  "timestamp": "2025-11-02T15:37:11",
   "model_type": "rf",
   "env": "dev",
   "test_mode": false,
   "run_id": "35dc84a2ce7b427b8a3fded8435fef35",
-  "model_uri": "gs://.../mlflow-artifacts/35dc84a.../artifacts/model/",
+  "model_uri": "gs://.../mlflow-artifacts/.../artifacts/model/",
   "rmse": 47.28,
-  "r2": 0.7920
+  "r2": 0.7920,
+  "double_evaluation_enabled": true,
+  "r2_baseline": 0.79,
+  "r2_current": 0.82,
+  "baseline_regression": false
 }
 ```
 
-**Why both?** MLflow for human exploration, summary.json for programmatic DAG access.
+**Why both?** MLflow for human exploration, summary.json for programmatic access.
 
 ---
 
-## Decision Triggers
+## Complete Workflows
 
-### When to Train Champion Locally
-
-| Trigger | Action | Priority |
-|---------|--------|----------|
-| **Quarterly schedule** | Merge 3 months prod data + retrain | Regular |
-| **Performance drop >20%** | Investigate + retrain with fix | High |
-| **New features available** | Experiment locally first | Medium |
-| **Architecture change** | Full local development cycle | High |
-
-### When to Fine-Tune in Production
-
-| Trigger | Action | Priority |
-|---------|--------|----------|
-| **Weekly drift detected** | Fine-tune on last 30 days | Automated |
-| **Performance drop 10-20%** | Lightweight adaptation | Medium |
-| **Seasonal events** | Pre-emptive fine-tuning | Low |
-
-### Evaluation Best Practices
-
-✅ **DO:**
-
-- Always evaluate on `test_baseline.csv` (fixed test set)
-- Use 5% improvement threshold for promotion
-- Log all decisions to `monitoring_audit.logs`
-
-❌ **DON'T:**
-
-- Train and evaluate on the same recent data
-- Promote based on training metrics alone
-- Skip test set evaluation
-
----
-
-## Complete Workflow Diagram
+### Local Champion Workflow
 
 ```text
 ┌───────────────────────────────────────────────────────────────┐
@@ -399,125 +421,64 @@ See [mlflow_cloudsql.md](./mlflow_cloudsql.md) for complete setup details and tr
 │                                                               │
 │  1. Merge historical + prod data → new_train_baseline.csv    │
 │  2. python train.py --model-type rf --data-source baseline   │
-│  3. Evaluate on test_baseline.csv from GCS                   │
-│  4. Upload artifacts to gs://.../mlflow-artifacts/{run_id}/  │
-│  5. Update summary.json [env=dev, test_mode=false]           │
-│  6. Register in MLflow: bike-traffic-rf v{N}                 │
+│  3. ✅ Evaluate on test_baseline.csv (detect regression)     │
+│  4. ✅ Evaluate on test_current (if provided)                │
+│  5. Upload artifacts to gs://.../mlflow-artifacts/{run_id}/  │
+│  6. Update summary.json with double eval metrics             │
+│  7. Register in MLflow: bike-traffic-rf v{N}                 │
 │                                                               │
-│  Metrics: RMSE ~47, R² ~0.79 (RandomForest)                  │
+│  Expected Metrics: RMSE ~47, R² ~0.79 (RandomForest)         │
 │                                                               │
 └───────────────────────────────────────────────────────────────┘
-                            ↓
+```
+
+### Production Fine-Tuning Workflow
+
+```text
 ┌───────────────────────────────────────────────────────────────┐
 │ PRODUCTION FINE-TUNING (Weekly via Airflow)                  │
 ├───────────────────────────────────────────────────────────────┤
 │                                                               │
 │  1. dag_monitor_and_train.py triggers on drift alert         │
-│  2. POST /train API with last 30 days from BigQuery          │
-│  3. Fine-tune current champion (low learning rate)           │
-│  4. Evaluate challenger on test_baseline.csv                 │
-│  5. Compare: challenger_rmse vs champion_rmse                │
+│  2. POST /train with last 30 days from BigQuery              │
+│  3. Train on train_baseline.csv (660K samples)               │
+│  4. ✅ Evaluate on test_baseline.csv (R² >= 0.60?)           │
+│  5. ✅ Evaluate on test_current (improvement?)               │
 │                                                               │
-│     IF challenger < champion * 0.95:                          │
-│        → Promote to production                                │
+│     Decision Logic:                                           │
+│                                                               │
+│     IF r2_baseline < 0.60:                                    │
+│        → ❌ REJECT (baseline regression)                      │
+│        → Log "fine_tune_rejected"                             │
+│                                                               │
+│     ELIF r2_current > champion_r2:                            │
+│        → ✅ DEPLOY (improved on current distribution)         │
 │        → Update summary.json [env=prod]                       │
-│        → Log "champion_promoted" event                        │
+│        → Log "champion_promoted"                              │
+│                                                               │
 │     ELSE:                                                     │
-│        → Keep current champion                                │
-│        → Log "champion_kept" event                            │
+│        → ⏭️  SKIP (no improvement)                            │
+│        → Log "champion_kept"                                  │
 │                                                               │
 └───────────────────────────────────────────────────────────────┘
 ```
 
----
+### Decision Triggers
 
-## Environment Variables
-
-Set these before training:
-
-```bash
-# Required for GCS data access
-export TRAIN_DATA_PATH=gs://df_traffic_cyclist1/data/train_baseline.csv
-export TEST_DATA_PATH=gs://df_traffic_cyclist1/data/test_baseline.csv
-
-# Required for MLflow artifact upload
-export GOOGLE_APPLICATION_CREDENTIALS=./mlflow-trainer.json
-
-# Optional: MLflow tracking URI (defaults to localhost:5000)
-export MLFLOW_TRACKING_URI=http://127.0.0.1:5000
-```
+| Trigger | Action | Evaluation Strategy |
+|---------|--------|---------------------|
+| **Weekly drift detected** | Fine-tune on last 30 days | Double eval (baseline + current) |
+| **Performance drop 10-20%** | Lightweight adaptation | Double eval (baseline + current) |
+| **Performance drop >20%** | Full retrain locally | Double eval (baseline + current) |
+| **Quarterly schedule** | Merge 3 months + retrain | Double eval (baseline only) |
+| **New features available** | Experiment locally | Double eval (baseline only) |
+| **Architecture change** | Full local development | Double eval (baseline only) |
 
 ---
 
-## Summary
+## Manual Testing with Double Evaluation
 
-**Key Principles:**
-
-1. **Local champion training** ensures high-quality baselines with full control
-2. **Production fine-tuning** provides agility to adapt to recent patterns
-3. **Fixed test set** (`test_baseline.csv`) guarantees fair model comparison
-4. **Dual registry** (MLflow + summary.json) serves both humans and automation
-5. **Conservative promotion** (5% threshold) prevents model churn
-
-**Benefits:**
-
-- ✅ No cloud costs for heavy training (local GPU)
-- ✅ Fast adaptation to drift (weekly fine-tuning)
-- ✅ Rigorous evaluation (fixed test set)
-- ✅ Full lineage tracking (MLflow + Airflow logs)
-- ✅ Rollback capability (versioned models in registry)
-
----
-
-**Related Documentation:**
-
-- [secrets.md](./secrets.md) — GCS credentials and Secret Manager setup
-- [bigquery_setup.md](./bigquery_setup.md) — Production data pipeline
-- [dvc.md](./dvc.md) — Data versioning strategy
-- [MLOPS_ROADMAP.md](../MLOPS_ROADMAP.md) — Overall MLOps architecture
-
----
-
-## Double Test Set Evaluation Strategy
-
-**Added**: 2025-11-02
-**Status**: ✅ Implemented and Tested
-
-### Overview
-
-The **double test set evaluation strategy** enhances deployment decisions by evaluating models on two test sets:
-
-1. **test_baseline**: Fixed reference test set (132K samples, 20% of train_baseline.csv)
-   - Detects model regression (performance drop on known data)
-   - Threshold: R² >= 0.60
-
-2. **test_current**: Dynamic test set (20% of current production data)
-   - Evaluates performance on new data distribution
-   - Used to compare against production model
-
-This approach is based on the paper "Hidden Technical Debt in Machine Learning Systems" (Sculley et al., NIPS 2015).
-
-### Decision Logic
-
-```python
-BASELINE_R2_THRESHOLD = 0.60
-
-if metrics_baseline["r2"] < BASELINE_R2_THRESHOLD:
-    decision = "reject_regression"
-    # Model regressed on baseline - DO NOT DEPLOY
-
-elif metrics_current["r2"] > production_model_r2:
-    decision = "deploy"
-    # Model improved on current distribution - DEPLOY
-
-else:
-    decision = "skip_no_improvement"
-    # No improvement on current distribution - KEEP CURRENT MODEL
-```
-
-### Usage Examples
-
-#### Via API (Manual Testing)
+### Via API
 
 ```python
 import pandas as pd
@@ -552,81 +513,85 @@ response = requests.post(
 
 result = response.json()
 print(f"Double eval enabled: {result['double_evaluation_enabled']}")
-print(f"Baseline R²: {result['metrics_baseline']['r2']}")
-print(f"Current R²: {result['metrics_current']['r2']}")
+print(f"Baseline R²: {result['metrics_baseline']['r2']:.3f}")
+print(f"Current R²: {result['metrics_current']['r2']:.3f}")
 print(f"Regression detected: {result['baseline_regression']}")
+print(f"Decision: {result.get('deployment_decision', 'N/A')}")
 ```
 
-#### Via Airflow DAG (Automated)
+---
 
-The `monitor_and_fine_tune` DAG automatically uses double evaluation:
+## Monitoring & Audit Trail
 
-```bash
-# Trigger manually
-docker exec airflow-webserver airflow dags trigger monitor_and_fine_tune
+| Resource | Location | Contents |
+|----------|----------|----------|
+| **MLflow Experiments** | <http://localhost:5000> | All runs with double eval metrics |
+| **BigQuery Audit** | `monitoring_audit.logs` | decision, baseline_regression, r2_baseline, r2_current |
+| **Drift Reports** | `gs://df_traffic_cyclist1/drift_reports/` | Evidently HTML reports |
+| **Model Registry** | MLflow UI + summary.json | Version history, lineage, metrics |
 
-# Or wait for weekly schedule (@weekly - Sunday 00:00)
-```
+---
 
-**DAG Flow with Double Evaluation:**
+## Implementation Files
 
-1. Monitor → Detect drift using Evidently
-2. Validate → Check production model (RMSE threshold: 50)
-3. Decide → If RMSE > 50, trigger fine-tuning
-4. Fine-tune:
-   - Fetch last 30 days from BigQuery (limit 2000 rows)
-   - Train on train_baseline.csv (660K samples)
-   - Evaluate on test_baseline + test_current (20% of fetched data)
-5. Decision → Deploy/Reject/Skip based on double metrics
-6. Audit → Log all metrics to BigQuery `monitoring_audit.logs`
+| File | Purpose |
+|------|---------|
+| `backend/regmodel/app/train.py` | Training logic, double evaluation, path resolution |
+| `backend/regmodel/app/fastapi_app.py` | `/train` API endpoint |
+| `dags/dag_monitor_and_train.py` | Airflow orchestration, `fine_tune_model()` |
+| `scripts/create_reference_sample.py` | Generate test_current samples |
 
-### Test Results (2025-11-02)
+---
 
-**Test Scenario**: Small sample training to verify regression detection
+## Best Practices
 
-| Metric | Training (964 rows) | test_baseline (132K) | test_current (38) |
-|--------|---------------------|----------------------|-------------------|
-| RMSE   | 35.90               | 317.10               | 36.01             |
-| MAE    | -                   | 53.68                | 21.85             |
-| R²     | 0.882               | **0.051** 🚨         | 0.854             |
+### DO
 
-**Decision**: ❌ REJECT (baseline_regression=True)
+- Always use double evaluation for production deployments
+- Evaluate on `test_baseline.csv` (fixed test set) to detect regression
+- Use R² >= 0.60 threshold on baseline (prevents catastrophic failures)
+- Compare on `test_current` to ensure improvement on new distribution
+- Log all decisions to `monitoring_audit.logs`
+- Train on full `train_baseline.csv` (660K samples) for production models
 
-**Analysis**:
+### DON'T
 
-- Model fit training data well (R² = 0.88)
-- Model performed well on current test set (R² = 0.85)
-- **BUT model catastrophically failed on baseline** (R² = 0.05)
-- Double evaluation **correctly detected regression** and rejected deployment
-- This proves the model doesn't generalize beyond the small sample
+- Train and evaluate on the same recent data
+- Promote based on training metrics alone
+- Skip baseline evaluation (regression can be silent)
+- Ignore baseline_regression flag in API response
+- Use small samples for production training (< 1000 rows)
 
-### Expected Production Results
+---
 
-With `data_source="baseline"` (660K samples for training):
+## Summary
 
-- Training time: ~2-5 minutes
-- Baseline R² should be > 0.60 (no regression)
-- Current R² comparison determines deployment
-- Typical baseline R²: 0.75-0.85 (based on previous runs)
+**Key Benefits:**
 
-### Benefits
+- **Champion + Intelligent Retraining**: High-quality baselines + adaptive fine-tuning
+- **Double Evaluation**: Prevents both regression and overfitting
+- **Cost-Effective**: Local GPU for heavy training, cloud for lightweight adaptation
+- **Rigorous**: Fixed test set + new distribution evaluation
+- **Auditable**: Full lineage via MLflow + BigQuery logs
+- **Rollback-Ready**: Versioned models in registry
 
-1. **Prevents Regression**: Catches models that fit new data but lose generalization
-2. **Data Distribution Shifts**: Detects when new data distribution differs significantly
-3. **Intelligent Deployment**: Deploys only when both criteria are met (no regression + improvement)
-4. **Audit Trail**: All decisions logged with full metrics to BigQuery
+**Architecture Highlights:**
 
-### Monitoring & Logs
+| Component | Implementation | Benefit |
+|-----------|---------------|---------|
+| **Champion Training** | Local GPU, 660K samples | High quality, no cloud cost |
+| **Double Evaluation** | test_baseline + test_current | Prevents regression + ensures improvement |
+| **Weekly Fine-Tuning** | Airflow + API, 30 days data | Fast adaptation to drift |
+| **MLflow Integration** | Cloud SQL + GCS | Centralized tracking, team collaboration |
+| **Audit Logging** | BigQuery + GCS | Full decision history, compliance |
 
-- **MLflow runs**: <http://localhost:5000> (includes all double evaluation metrics)
-- **BigQuery audit**: `monitoring_audit.logs` table (decision, baseline_regression, r2_baseline, r2_current)
-- **Drift reports**: `gs://df_traffic_cyclist1/drift_reports/` (Evidently HTML reports)
+---
 
-### Implementation Files
+**Related Documentation:**
 
-- **Training logic**: `backend/regmodel/app/train.py`
-  - `get_test_baseline_path()`: Environment-aware path resolution
-  - `evaluate_double()`: Double evaluation implementation
-  - `train_rf()`, `train_nn()`: Training with optional double eval
-- **API endpoint**: `backend/regmodel/app/fastapi_app.py` - `/train`
-- **DAG orchestration**: `dags/dag_monitor_and_train.py` - `fine_tune_model()`
+- [secrets.md](./secrets.md) — GCS credentials and Secret Manager setup
+- [bigquery_setup.md](./bigquery_setup.md) — Production data pipeline
+- [dvc.md](./dvc.md) — Data versioning strategy
+- [mlflow_cloudsql.md](./mlflow_cloudsql.md) — MLflow setup and troubleshooting
+- [dags.md](./dags.md) — Airflow DAG documentation
+- [MLOPS_ROADMAP.md](../MLOPS_ROADMAP.md) — Overall MLOps architecture
