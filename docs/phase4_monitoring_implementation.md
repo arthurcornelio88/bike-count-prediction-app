@@ -384,13 +384,13 @@ bike_model_deployments_total{decision}
 
 ## Checklist de progression
 
-### Phase 1 : Infrastructure ⏳
+### Phase 1 : Infrastructure ✅
 
-- [ ] Activer containers Prometheus + Grafana
-- [ ] Créer structure provisioning Grafana
-- [ ] Mettre à jour prometheus.yml
-- [ ] Vérifier Prometheus UI (localhost:9090)
-- [ ] Vérifier Grafana UI (localhost:3000)
+- [x] Activer containers Prometheus + Grafana
+- [x] Créer structure provisioning Grafana
+- [x] Mettre à jour prometheus.yml
+- [x] Vérifier Prometheus UI (localhost:9090)
+- [x] Vérifier Grafana UI (localhost:3000)
 
 ### Phase 2 : FastAPI ⏸️
 
@@ -492,7 +492,8 @@ bike_model_deployments_total{decision}
 ### 2025-11-03
 
 - ✅ Document de référence créé
-- ⏳ Phase 1 en cours : activation infrastructure
+- ✅ Phase 1 finalisée : containers up, provisioning Grafana en place,
+  Prometheus et Grafana accessibles
 
 ---
 
