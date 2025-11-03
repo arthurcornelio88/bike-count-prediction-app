@@ -115,7 +115,7 @@ Ajouter scrape targets :
 
 ---
 
-### Phase 2 : FastAPI Instrumentation (45 min) 📋 TODO
+### Phase 2 : FastAPI Instrumentation (45 min) ✅ COMPLETE
 
 #### 2.1 Dépendances
 
@@ -152,20 +152,17 @@ Créer : `backend/regmodel/app/middleware/prometheus_metrics.py`
 
 ---
 
-### Phase 3 : Airflow Metrics Export (1h) 📋 TODO
+### Phase 3 : Airflow Metrics Export (1h) ✅ COMPLETE
 
-**Option A : Airflow StatsD** (recommandé)
+**Option choisie : Custom Scraper** (plus de contrôle sur les XCom values)
 
-```env
-AIRFLOW__METRICS__STATSD_ON=True
-AIRFLOW__METRICS__STATSD_HOST=statsd-exporter
-AIRFLOW__METRICS__STATSD_PORT=9125
-```
+Fichiers créés :
 
-Ajouter container `statsd-exporter` dans docker-compose.
+- `monitoring/custom_exporters/airflow_exporter.py` - Flask app
+- `monitoring/custom_exporters/requirements.txt` - Dépendances
+- `monitoring/custom_exporters/Dockerfile` - Container Python
 
-**Option B : Custom Scraper**
-Créer : `monitoring/custom_exporters/airflow_exporter.py`
+Service ajouté dans `docker-compose.yaml` : `airflow-exporter` (port 9101)
 
 Métriques exposées :
 

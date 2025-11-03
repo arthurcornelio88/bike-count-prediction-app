@@ -270,6 +270,27 @@ services:
     profiles:
       - monitoring  # Only starts with: docker compose --profile monitoring up
 
+  # ========================================
+  # Airflow Prometheus Exporter (Custom)
+  # ========================================
+  airflow-exporter:
+    build:
+      context: monitoring/custom_exporters
+      dockerfile: Dockerfile
+    container_name: airflow-exporter
+    ports:
+      - "9101:9101"
+    environment:
+      - AIRFLOW_BASE_URL=http://airflow-webserver:8080
+      - AIRFLOW_USERNAME=${_AIRFLOW_WWW_USER_USERNAME:-admin}
+      - AIRFLOW_PASSWORD=${_AIRFLOW_WWW_USER_PASSWORD:-admin}
+      - PYTHONUNBUFFERED=1  # Disable Python output buffering
+    depends_on:
+      - airflow-webserver
+    restart: always
+    profiles:
+      - monitoring  # Only starts with: docker compose --profile monitoring up
+
 volumes:
   postgres_airflow_data:
   prometheus_data:

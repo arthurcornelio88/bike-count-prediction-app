@@ -17,12 +17,12 @@ scrape_configs:
     metrics_path: '/metrics'
     scrape_interval: 10s
 
-  # Airflow metrics (Phase 4 - custom exporter or StatsD)
+  # Airflow metrics (Phase 4 - custom exporter)
   - job_name: 'airflow-metrics'
     static_configs:
-      - targets: ['airflow-webserver:8080']
+      - targets: ['airflow-exporter:9101']
     metrics_path: '/metrics'
-    scrape_interval: 15s
+    scrape_interval: 30s  # Exporter caches for 60s, so 30s is good
 
   # Prometheus self-monitoring
   - job_name: 'prometheus'
