@@ -1,7 +1,7 @@
 # 🎯 MLOps Roadmap — Bike Traffic Prediction
 
-**Date limite soutenance** : 7 novembre 2025
-**Branche principale** : `feat/mlops-integration`
+- **Date limite soutenance** : 7 novembre 2025
+- **Branche principale** : `feat/mlops-integration`
 
 ---
 

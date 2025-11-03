@@ -16,6 +16,9 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Install UV in final image for runtime package management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
 # Copy virtual environment from builder
 COPY --from=builder /app/.venv /app/.venv
 

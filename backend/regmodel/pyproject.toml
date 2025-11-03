@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Regression Model API for bike traffic prediction"
 requires-python = ">=3.11"
 dependencies = [
+    "evidently==0.5.0",
     "fastapi==0.115.12",
     "fsspec>=2025.5.0",
     "gcsfs>=2025.5.0.post1",

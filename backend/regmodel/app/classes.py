@@ -69,10 +69,18 @@ class RawCleanerTransformer(BaseEstimator, TransformerMixin):
         if "date_et_heure_de_comptage" in X.columns:
             X.drop(columns="date_et_heure_de_comptage", inplace=True)
 
-        # Coordonnées
-        X[["latitude", "longitude"]] = (
-            X["coordonnées_géographiques"].str.split(",", expand=True).astype(float)
-        )
+        # Coordonnées - handle both CSV format (combined) and BigQuery format (separate)
+        if "coordonnées_géographiques" in X.columns:
+            # CSV format: split combined coordinates
+            X[["latitude", "longitude"]] = (
+                X["coordonnées_géographiques"].str.split(",", expand=True).astype(float)
+            )
+        elif "latitude" not in X.columns or "longitude" not in X.columns:
+            # If neither format is present, raise error
+            raise ValueError(
+                f"Missing coordinate columns. Available columns: {list(X.columns)}"
+            )
+        # If latitude/longitude already exist (BigQuery format), keep them as-is
 
         colonnes_a_supprimer = [
             "mois_annee_comptage",

@@ -66,7 +66,7 @@ services:
       - ./data:/app/data:ro
     depends_on:
       - mlflow
-    command: ["/app/.venv/bin/uvicorn", "app.fastapi_app:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    command: ["/app/.venv/bin/uvicorn", "app.fastapi_app:app", "--host", "0.0.0.0", "--port", "8000"]
 
   # ========================================
   # ClassModel API (Legacy - kept for reference)

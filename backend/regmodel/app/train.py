@@ -76,17 +76,46 @@ def setup_environment(env: str, model_test: bool):
 
 
 def load_and_clean_data(path: str, preserve_target=False):
+    """
+    Load raw data from CSV without any transformation.
+
+    All transformations (coordinate splitting, datetime parsing, etc.)
+    are handled by RawCleanerTransformer in the pipeline.
+
+    Args:
+        path: Path to CSV file
+        preserve_target: If True, return full dataframe including target
+
+    Returns:
+        If preserve_target=False: (X, y) tuple
+        If preserve_target=True: Full dataframe
+    """
     df = pd.read_csv(path, sep=";")
-    df[["latitude", "longitude"]] = (
-        df["Coordonnées géographiques"].str.split(",", expand=True).astype(float)
-    )
-    df_clean = df.dropna(subset=["latitude", "longitude"])
+
+    # Normalize column names: handle both "Comptage horaire" (CSV) and "comptage_horaire" (BigQuery)
+    target_col = None
+    if "Comptage horaire" in df.columns:
+        target_col = "Comptage horaire"
+    elif "comptage_horaire" in df.columns:
+        target_col = "comptage_horaire"
+        # Rename to standard format for consistency
+        df = df.rename(columns={"comptage_horaire": "Comptage horaire"})
+        target_col = "Comptage horaire"
+
+    # Drop rows with missing target variable
+    if target_col and target_col in df.columns:
+        df = df.dropna(subset=[target_col])
 
     if preserve_target:
-        return df_clean
+        return df
 
-    X = df_clean.drop(columns="Comptage horaire")
-    y = df_clean["Comptage horaire"]
+    if target_col is None:
+        raise ValueError(
+            f"Target column not found. Available columns: {list(df.columns)}"
+        )
+
+    X = df.drop(columns="Comptage horaire")
+    y = df["Comptage horaire"]
     return X, y
 
 
@@ -110,7 +139,11 @@ def get_test_baseline_path(env: str) -> str:
 
 
 def evaluate_double(
-    model, test_baseline_path: str, current_data_df: pd.DataFrame, model_type: str
+    model,
+    test_baseline_path: str,
+    current_data_df: pd.DataFrame,
+    model_type: str,
+    test_mode: bool = False,
 ):
     """
     Evaluate model on both test sets (baseline + current).
@@ -124,6 +157,7 @@ def evaluate_double(
         test_baseline_path: Path to test_baseline.csv (local or GCS)
         current_data_df: Current data DataFrame (will be split 80/20)
         model_type: "rf", "nn", or "rf_class"
+        test_mode: If True, skip test_baseline evaluation (too large for testing)
 
     Returns:
         dict with:
@@ -144,10 +178,16 @@ def evaluate_double(
     print(f"🔬 DOUBLE EVALUATION STRATEGY - {model_type.upper()}")
     print(f"{'='*60}")
 
-    # 1. Load test_baseline from GCS or local
-    print(f"📥 Loading test_baseline from {test_baseline_path}")
-    X_baseline, y_baseline = load_and_clean_data(test_baseline_path)
-    print(f"✅ Baseline test set loaded: {len(y_baseline)} samples")
+    # 1. Load test_baseline from GCS or local (skip in test_mode to avoid loading 181k rows)
+    if test_mode:
+        print("⚡ TEST MODE: Skipping test_baseline evaluation (too large)")
+        metrics_baseline = {"rmse": 0.0, "r2": 0.0, "mae": 0.0}
+        baseline_regression = False
+        test_baseline_size = 0
+    else:
+        print(f"📥 Loading test_baseline from {test_baseline_path}")
+        X_baseline, y_baseline = load_and_clean_data(test_baseline_path)
+        print(f"✅ Baseline test set loaded: {len(y_baseline)} samples")
 
     # 2. Split current data (80/20) - use 20% for testing
     if len(current_data_df) < 200:
@@ -171,19 +211,24 @@ def evaluate_double(
     X_current, y_current = load_and_clean_data(temp_path)
     os.remove(temp_path)
 
-    # 3. Evaluate on baseline (check for regression)
-    print("\n📍 Evaluating on test_baseline...")
-    y_pred_baseline = model.predict(X_baseline)
+    # 3. Evaluate on baseline (check for regression) - skip in test_mode
+    if not test_mode:
+        print("\n📍 Evaluating on test_baseline...")
+        y_pred_baseline = model.predict(X_baseline)
 
-    # Handle NN predictions (flatten if needed)
-    if hasattr(y_pred_baseline, "flatten"):
-        y_pred_baseline = y_pred_baseline.flatten()
+        # Handle NN predictions (flatten if needed)
+        if hasattr(y_pred_baseline, "flatten"):
+            y_pred_baseline = y_pred_baseline.flatten()
 
-    metrics_baseline = {
-        "rmse": float(np.sqrt(mean_squared_error(y_baseline, y_pred_baseline))),
-        "r2": float(r2_score(y_baseline, y_pred_baseline)),
-        "mae": float(mean_absolute_error(y_baseline, y_pred_baseline)),
-    }
+        metrics_baseline = {
+            "rmse": float(np.sqrt(mean_squared_error(y_baseline, y_pred_baseline))),
+            "r2": float(r2_score(y_baseline, y_pred_baseline)),
+            "mae": float(mean_absolute_error(y_baseline, y_pred_baseline)),
+        }
+
+        # Check for baseline regression
+        BASELINE_R2_THRESHOLD = 0.60  # Minimum acceptable R² on baseline
+        baseline_regression = metrics_baseline["r2"] < BASELINE_R2_THRESHOLD
 
     # 4. Evaluate on current (check for improvement)
     print("🆕 Evaluating on test_current...")
@@ -199,26 +244,27 @@ def evaluate_double(
         "mae": float(mean_absolute_error(y_current, y_pred_current)),
     }
 
-    # 5. Check for baseline regression
-    BASELINE_R2_THRESHOLD = 0.60  # Minimum acceptable R² on baseline
-    baseline_regression = metrics_baseline["r2"] < BASELINE_R2_THRESHOLD
-
     # Print summary
     print(f"\n{'='*60}")
     print("📊 DOUBLE EVALUATION RESULTS")
     print(f"{'='*60}")
-    print(f"📍 Test Baseline (fixed reference, n={len(y_baseline)}):")
-    print(f"   - RMSE: {metrics_baseline['rmse']:.2f}")
-    print(f"   - MAE:  {metrics_baseline['mae']:.2f}")
-    print(f"   - R²:   {metrics_baseline['r2']:.4f}")
+
+    if not test_mode:
+        print(f"📍 Test Baseline (fixed reference, n={len(y_baseline)}):")
+        print(f"   - RMSE: {metrics_baseline['rmse']:.2f}")
+        print(f"   - MAE:  {metrics_baseline['mae']:.2f}")
+        print(f"   - R²:   {metrics_baseline['r2']:.4f}")
+
     print(f"\n🆕 Test Current (new distribution, n={len(y_current)}):")
     print(f"   - RMSE: {metrics_current['rmse']:.2f}")
     print(f"   - MAE:  {metrics_current['mae']:.2f}")
     print(f"   - R²:   {metrics_current['r2']:.4f}")
-    print(
-        f"\n{'🚨 REGRESSION DETECTED' if baseline_regression else '✅ No regression on baseline'}"
-    )
-    print(f"   Threshold: R² >= {BASELINE_R2_THRESHOLD}")
+
+    if not test_mode:
+        print(
+            f"\n{'🚨 REGRESSION DETECTED' if baseline_regression else '✅ No regression on baseline'}"
+        )
+        print(f"   Threshold: R² >= {BASELINE_R2_THRESHOLD}")
     print(f"{'='*60}\n")
 
     return {
@@ -226,7 +272,7 @@ def evaluate_double(
         "metrics_current": metrics_current,
         "baseline_regression": baseline_regression,
         "test_current_size": len(y_current),
-        "test_baseline_size": len(y_baseline),
+        "test_baseline_size": test_baseline_size,
         "train_current_data": train_current,  # Return 80% for augmented training
     }
 
@@ -338,6 +384,7 @@ def train_rf(X, y, env, test_mode, data_source="reference", current_data_df=None
                     test_baseline_path=test_baseline_path,
                     current_data_df=current_data_df,
                     model_type="rf",
+                    test_mode=test_mode,
                 )
 
                 # Log double metrics to MLflow
@@ -496,6 +543,7 @@ def train_nn(X, y, env, test_mode, data_source="reference", current_data_df=None
                     test_baseline_path=test_baseline_path,
                     current_data_df=current_data_df,
                     model_type="nn",
+                    test_mode=test_mode,
                 )
 
                 # Log double metrics to MLflow

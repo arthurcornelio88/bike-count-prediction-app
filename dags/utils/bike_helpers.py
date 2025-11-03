@@ -64,19 +64,20 @@ def get_storage_path(subdir: str, filename: str) -> str:
 
 def get_reference_data_path() -> str:
     """
-    Returns the path to reference_data.csv
-    DEV: ./data/reference_data.csv
-    PROD: gs://df_traffic_cyclist1/raw_data/reference_data.csv
+    Returns the path to reference_data.csv for API endpoints.
+
+    DEV: /app/data/reference_data.csv (path in backend container)
+    PROD: gs://df_traffic_cyclist1/data/reference_data.csv
+
+    Note: Backend container has ./data mounted at /app/data/
     """
     env = os.getenv("ENV", "DEV")
     if env == "PROD":
         bucket = os.getenv("GCS_BUCKET", "df_traffic_cyclist1")
-        return f"gs://{bucket}/raw_data/reference_data.csv"
+        return f"gs://{bucket}/data/reference_data.csv"
     else:
-        # Local: data/reference_data.csv
-        return os.path.abspath(
-            os.path.join(os.path.dirname(__file__), "../../data/reference_data.csv")
-        )
+        # Backend container path (mounted volume)
+        return "/app/data/reference_data.csv"
 
 
 def get_current_data_path() -> str:

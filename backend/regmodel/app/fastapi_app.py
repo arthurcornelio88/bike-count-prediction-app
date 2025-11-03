@@ -240,20 +240,37 @@ def monitor_endpoint(request: MonitorRequest):
 
             temp_ref = os.path.join(tempfile.gettempdir(), "reference_data_sample.csv")
             blob.download_to_filename(temp_ref)
-            df_reference = pd.read_csv(temp_ref)
+            df_reference = pd.read_csv(temp_ref, sep=";")
         else:
-            df_reference = pd.read_csv(request.reference_path)
+            df_reference = pd.read_csv(request.reference_path, sep=";")
 
         print(f"✅ Loaded {len(df_reference)} reference records")
+        print(f"Reference columns: {list(df_reference.columns)}")
 
         # Convert current data to DataFrame
         df_current = pd.DataFrame(request.current_data)
         print(f"✅ Loaded {len(df_current)} current records")
+        print(f"Current columns: {list(df_current.columns)}")
 
         # Ensure both DataFrames have the same columns
         common_cols = list(set(df_reference.columns) & set(df_current.columns))
+        print(f"Common columns: {common_cols}")
         if not common_cols:
-            raise ValueError("No common columns between reference and current data")
+            print("⚠️ No common columns found - treating as schema drift")
+            # If no common columns, consider it as drift (schema change)
+            return {
+                "status": "success",
+                "drift_summary": {
+                    "drift_detected": True,
+                    "drift_share": 1.0,  # Full drift due to schema change
+                    "drifted_features": [],
+                    "total_features": 0,
+                    "reference_size": len(df_reference),
+                    "current_size": len(df_current),
+                    "schema_drift": True,
+                },
+                "report_url": None,  # No report generated
+            }
 
         # Filter to relevant columns (exclude IDs, URLs, timestamps)
         exclude_patterns = [
