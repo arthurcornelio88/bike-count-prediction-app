@@ -462,7 +462,28 @@ Invokes the FastAPI `/train` endpoint with `data_source="baseline"` and optional
 - Double evaluation: champion vs new model on `test_baseline` + holdout current data
 - Writes result metrics, run ids, and deployment decision back to XCom for auditing
 
-![fine_tune_model screenshot placeholder](/docs/img/dag3_finetuning.png)
+**Real Production Run Results (2025-11-03, force=true, test_mode=false)**:
+
+- **Baseline Test Set** (181K samples, fixed reference):
+  - New model R²: **0.8161** (excellent!)
+  - Champion R²: **0.3091** (old compteurs distribution)
+  - Improvement: **+0.5070** (massive improvement)
+  - Baseline regression: ✅ NO (R² > 0.60)
+
+- **Current Test Set** (20% of fresh data, new distribution):
+  - New model R²: **0.9087**
+  - Champion R²: **0.7214**
+  - Improvement: **+0.1872** (significant improvement)
+
+- **Training Metrics** (on train_baseline):
+  - R²: **0.8666** (strong generalization)
+
+- **Deployment Decision**: ✅ **DEPLOY** - Model improved on both test sets
+  - No baseline regression detected
+  - Current distribution: +18.72% improvement
+  - Baseline distribution: +50.70% improvement
+
+![fine_tune_model screenshot](/docs/img/dag3_finetuning2.png)
 
 #### 3.5 `end_monitoring`
 
@@ -474,7 +495,20 @@ Final task that consolidates all run metadata and writes an audit record to BigQ
 - Model improvement delta, model URI, run id, decision rationale
 - `baseline_regression` & `double_evaluation_enabled` indicators
 
-![end_monitoring screenshot placeholder](/docs/img/dag3_end_monitoring.png)
+**Real Production Run Summary (2025-11-03)**:
+
+The audit log captured the complete monitoring cycle showing:
+
+- **Drift Detection**: ✅ YES (50% drift share detected)
+- **Current Champion**: RMSE=32.25, R²=0.7214 (excellent production performance)
+- **Fine-tuning**: ✅ SUCCESS with double evaluation enabled
+- **Model Improvement**: +0.1872 on current test set
+- **Deployment Decision**: ✅ DEPLOY - New model promoted to production
+- **Model URI**: `gs://df_traffic_cyclist1/mlflow-artifacts/1/849e4ce4402dd7dba3e94f1888663304/artifacts/model`
+
+This demonstrates the complete MLOps loop: drift detection → validation → training → double evaluation → deployment decision → audit logging.
+
+![end_monitoring screenshot](/docs/img/dag3_end_monitoring2.png)
 
 ### Monitoring Notes
 
