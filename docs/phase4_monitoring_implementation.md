@@ -392,16 +392,16 @@ bike_model_deployments_total{decision}
 - [x] Vérifier Prometheus UI (localhost:9090)
 - [x] Vérifier Grafana UI (localhost:3000)
 
-### Phase 2 : FastAPI ⏸️
+### Phase 2 : FastAPI ✅
 
-- [ ] Ajouter prometheus-client à requirements.txt
-- [ ] Créer middleware/prometheus_metrics.py
-- [ ] Modifier fastapi_app.py (import + /metrics)
-- [ ] Instrumenter /predict endpoint
-- [ ] Instrumenter /train endpoint
-- [ ] Instrumenter /monitor endpoint
-- [ ] Instrumenter /evaluate endpoint
-- [ ] Tester curl <http://localhost:8000/metrics>
+- [x] Ajouter prometheus-client à requirements.txt
+- [x] Créer middleware/prometheus_metrics.py
+- [x] Modifier fastapi_app.py (import + /metrics)
+- [x] Instrumenter /predict endpoint
+- [x] Instrumenter /train endpoint
+- [x] Instrumenter /monitor endpoint
+- [x] Instrumenter /evaluate endpoint
+- [x] Tester curl <http://localhost:8000/metrics>
 
 ### Phase 3 : Airflow ⏸️
 
@@ -494,6 +494,8 @@ bike_model_deployments_total{decision}
 - ✅ Document de référence créé
 - ✅ Phase 1 finalisée : containers up, provisioning Grafana en place,
   Prometheus et Grafana accessibles
+- ✅ Phase 2 finalisée : instrumentation FastAPI, exposition /metrics et
+  restart regmodel-backend confirmé (Prometheus scrape OK)
 
 ---
 

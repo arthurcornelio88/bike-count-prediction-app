@@ -2,14 +2,30 @@ import os
 import shutil
 import hashlib
 import tempfile
+import time
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
 import pandas as pd
 
 from app.model_registry_summary import get_best_model_from_summary
+from app.middleware.prometheus_metrics import (
+    PrometheusMiddleware,
+    observe_prediction,
+    prometheus_response,
+    record_drift_check,
+    record_training,
+    update_drift_metrics,
+    update_model_metrics,
+)
 
 app = FastAPI()
+app.add_middleware(PrometheusMiddleware)
+
+
+@app.get("/metrics")
+def metrics_endpoint():
+    return prometheus_response()
 
 
 def setup_credentials():
@@ -90,12 +106,19 @@ class PredictRequest(BaseModel):
 # === Endpoint de prédiction ===
 @app.post("/predict")
 def predict(data: PredictRequest):
+    start_time = time.perf_counter()
     df = pd.DataFrame(data.records)
 
     try:
         model = get_cached_model(data.model_type, data.metric)
         y_pred = model.predict_clean(df)
-        return {"predictions": y_pred.tolist()}
+        predictions = y_pred.tolist()
+        observe_prediction(
+            model_type=data.model_type,
+            latency_seconds=time.perf_counter() - start_time,
+            predictions_count=len(predictions),
+        )
+        return {"predictions": predictions}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -139,6 +162,7 @@ def train_endpoint(request: TrainRequest):
         "test_mode": false
     }
     """
+    start_time = time.perf_counter()
     try:
         from app.train import train_model
 
@@ -182,6 +206,19 @@ def train_endpoint(request: TrainRequest):
         else:
             response["double_evaluation_enabled"] = False
 
+        record_training(
+            duration_seconds=time.perf_counter() - start_time,
+            model_type=request.model_type,
+            status="success",
+        )
+
+        metrics_payload = result.get("metrics") or {}
+        update_model_metrics(
+            model_type=request.model_type,
+            r2=metrics_payload.get("r2"),
+            rmse=metrics_payload.get("rmse"),
+        )
+
         return response
 
     except Exception as e:
@@ -189,6 +226,11 @@ def train_endpoint(request: TrainRequest):
 
         print(f"❌ Training failed: {str(e)}")
         print(traceback.format_exc())
+        record_training(
+            duration_seconds=time.perf_counter() - start_time,
+            model_type=request.model_type,
+            status="failed",
+        )
         raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
 
 
@@ -279,6 +321,12 @@ def evaluate_endpoint(request: EvaluateRequest):
             "mae": float(mean_absolute_error(y_baseline, y_pred)),
         }
 
+        update_model_metrics(
+            model_type=request.model_type,
+            r2=metrics.get("r2"),
+            rmse=metrics.get("rmse"),
+        )
+
         print("✅ Evaluation complete:")
         print(f"   - RMSE: {metrics['rmse']:.2f}")
         print(f"   - R²: {metrics['r2']:.4f}")
@@ -323,11 +371,8 @@ def monitor_endpoint(request: MonitorRequest):
         "output_html": "drift_report_20251029.html"
     }
 
-    TODO [Phase 4 - Prometheus]: Add Prometheus metrics
-          - prometheus_client.Gauge('evidently_drift_detected')
-          - prometheus_client.Gauge('evidently_drift_share')
-          - prometheus_client.Counter('evidently_drift_checks_total')
     """
+    record_drift_check()
     try:
         from evidently.report import Report
         from evidently.metric_preset import DataDriftPreset
@@ -366,6 +411,7 @@ def monitor_endpoint(request: MonitorRequest):
         if not common_cols:
             print("⚠️ No common columns found - treating as schema drift")
             # If no common columns, consider it as drift (schema change)
+            update_drift_metrics(True, 1.0, 0)
             return {
                 "status": "success",
                 "drift_summary": {
@@ -469,9 +515,11 @@ def monitor_endpoint(request: MonitorRequest):
         if drifted_features:
             print(f"   - Drifted features: {', '.join(drifted_features[:10])}")
 
-        # TODO: Push metrics to Prometheus (Phase 4)
-        # prometheus_client.Gauge('evidently_drift_detected').set(1 if drift_detected else 0)
-        # prometheus_client.Gauge('evidently_drift_share').set(drift_share)
+        update_drift_metrics(
+            drift_detected=drift_detected,
+            drift_share=drift_share,
+            drifted_features=len(drifted_features),
+        )
 
         return {
             "status": "success",
