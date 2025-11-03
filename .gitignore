@@ -18,6 +18,7 @@ coverage.xml
 
 # data (ignore CSV files but allow .dvc metadata)
 data/*.csv
+data/*.bak
 data/*.parquet
 !data/*.dvc
 
