@@ -1,4 +1,5 @@
 # ===== Builder stage with UV =====
+# Multi-platform compatible: supports both linux/amd64 and linux/arm64
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS builder
 
 WORKDIR /app
@@ -14,6 +15,9 @@ RUN uv venv /app/.venv && \
 FROM python:3.11-slim
 
 WORKDIR /app
+
+# Install UV in final image for runtime package management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
 # Copy virtual environment from builder
 COPY --from=builder /app/.venv /app/.venv

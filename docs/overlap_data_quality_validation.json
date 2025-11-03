@@ -1,0 +1,53 @@
+{
+  "validation_date": "2025-10-11T21:22:26.007562",
+  "overlap_period": {
+    "start": "2024-09-01",
+    "end": "2025-05-17",
+    "days": 259
+  },
+  "csv_data": {
+    "total_records": 595328,
+    "valid_records": 564213,
+    "unique_days": 259,
+    "unique_counters": 107,
+    "mean_comptage": 81.8051232424634,
+    "outliers_count": 44706,
+    "outliers_pct": 7.923603320022757
+  },
+  "api_data": {
+    "total_records": 594898,
+    "valid_records": 563815,
+    "unique_days": 259,
+    "unique_counters": 108,
+    "mean_count": 81.84212551989572,
+    "outliers_count": 44704,
+    "outliers_pct": 7.928841907363231
+  },
+  "comparison": {
+    "counter_overlap_pct": 100.0,
+    "common_counters": 107,
+    "ks_test": {
+      "statistic": 0.0002648537041234911,
+      "pvalue": 1.0,
+      "passed": true
+    },
+    "mannwhitney_test": {
+      "statistic": 159012932662.0,
+      "pvalue": 0.8038615560417938,
+      "passed": true
+    }
+  },
+  "matched_records": {
+    "count": 563765,
+    "correlation": 1.0,
+    "mae": 0.0,
+    "mape": 0.0,
+    "ttest_pvalue": NaN
+  },
+  "quality_assessment": {
+    "tests_passed": 4,
+    "total_tests": 4,
+    "score_pct": 100.0,
+    "recommendation": "trustworthy"
+  }
+}

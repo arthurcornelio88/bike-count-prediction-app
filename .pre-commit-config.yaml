@@ -1,0 +1,82 @@
+# Pre-commit hooks configuration with UV
+# See https://pre-commit.com for more information
+
+repos:
+  # UV-managed Python tooling
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.6.9
+    hooks:
+      # Linter
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      # Formatter
+      - id: ruff-format
+
+  # Trailing whitespace and file format checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]  # Allow custom YAML tags in docker-compose
+      - id: check-added-large-files
+        args: [--maxkb=10000]
+      - id: check-json
+      - id: check-merge-conflict
+      - id: detect-private-key
+
+  # Python-specific checks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: check-ast  # Check Python syntax
+      - id: debug-statements  # Check for debugger imports
+
+  # Type checking with mypy (optional but recommended)
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.11.2
+    hooks:
+      - id: mypy
+        additional_dependencies: [types-requests, types-PyYAML]
+        args: [--ignore-missing-imports, --no-strict-optional]
+        exclude: ^(tests/|notebooks/|backend/classmodel/)
+
+  # Security checks
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.7.10
+    hooks:
+      - id: bandit
+        args: [-ll, -i]  # Low severity, skip assert warnings
+        exclude: ^tests/
+
+  # Markdown linting
+  - repo: https://github.com/igorshubovych/markdownlint-cli
+    rev: v0.42.0
+    hooks:
+      - id: markdownlint
+        args: [--fix, --config, .github/linters/.markdownlint.yaml]
+
+# Configure ruff (alternative to black + isort + flake8)
+# Settings can also go in pyproject.toml
+default_language_version:
+  python: python3.12
+
+# Files to exclude from all hooks
+exclude: |
+  (?x)^(
+      \.git/|
+      \.venv/|
+      \.pytest_cache/|
+      __pycache__/|
+      \.mypy_cache/|
+      \.ruff_cache/|
+      mlruns/|
+      mlruns_dev/|
+      mlruns_prod/|
+      mlflow_artifacts/|
+      logs/|
+      ref_dags/|
+      old/|
+      notebooks/
+  )

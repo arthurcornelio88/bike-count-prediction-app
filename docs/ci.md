@@ -2,7 +2,8 @@
 
 ## Overview
 
-This project uses **GitHub Actions** for Continuous Integration (CI) to automatically run tests, generate coverage reports, and validate code quality on every push and pull request.
+This project uses **GitHub Actions** for Continuous Integration (CI) to automatically run tests,
+generate coverage reports, and validate code quality on every push and pull request.
 
 ---
 
@@ -13,6 +14,7 @@ This project uses **GitHub Actions** for Continuous Integration (CI) to automati
 ### Triggers
 
 The CI workflow runs automatically on:
+
 - ✅ Push to `feat/*` branches
 - ✅ Push to `master` or `main` branches
 - ✅ Pull requests to `master` or `main`
@@ -117,10 +119,12 @@ jobs:
 ### 📊 Coverage Reports
 
 **Targeted coverage** on:
+
 - `app.classes` (RFPipeline, NNPipeline, Transformers)
 - `backend.regmodel.app.model_registry_summary` (Model registry logic)
 
 **Output formats**:
+
 - **Terminal** (`--cov-report=term-missing`) - Shows missing lines in CI logs
 - **XML** (`--cov-report=xml`) - For Codecov integration
 - **HTML** (`--cov-report=html`) - Downloadable artifact with detailed line-by-line coverage
@@ -128,6 +132,7 @@ jobs:
 ### 📦 Artifacts
 
 **Coverage HTML Report**:
+
 - **Name**: `coverage-report`
 - **Retention**: 30 days
 - **Location**: Actions tab → Workflow run → Artifacts section
@@ -136,6 +141,7 @@ jobs:
 ### 📈 Test Summary
 
 GitHub Actions displays a test summary in the workflow run UI showing:
+
 - ✅ Test completion status
 - 📊 Coverage report availability
 - 🔗 Links to artifacts
@@ -147,11 +153,13 @@ GitHub Actions displays a test summary in the workflow run UI showing:
 In our repo, here's an output of a succeeded worker run:
 
 ![CI Results](img/ci_results.png)
+
 ### 1. GitHub Actions Tab
 
 Navigate to: **Repository → Actions → MLOps CI Tests**
 
 **What you'll see**:
+
 - ✅ Green checkmark = All tests passed
 - ❌ Red X = Tests failed
 - 🟡 Yellow dot = Workflow running
@@ -159,6 +167,7 @@ Navigate to: **Repository → Actions → MLOps CI Tests**
 ### 2. Pull Request Checks
 
 When you create a PR, CI runs automatically and shows:
+
 - **Status** in the PR checks section
 - **Details** link to view full workflow logs
 - **Required checks** must pass before merging
@@ -166,6 +175,7 @@ When you create a PR, CI runs automatically and shows:
 ### 3. Coverage Artifacts
 
 **Download coverage report**:
+
 1. Go to workflow run (Actions tab)
 2. Scroll to "Artifacts" section
 3. Download `coverage-report.zip`
@@ -193,6 +203,7 @@ uv run pytest tests/ \
 ```
 
 **View local coverage**:
+
 ```bash
 open htmlcov/index.html  # macOS
 xdg-open htmlcov/index.html  # Linux
@@ -212,6 +223,7 @@ Our project is integrated with Codecov and shows **68.00% coverage**:
 ![Codecov Coverage Dashboard](img/codecov_coverage.png)
 
 **Live dashboard**:
+
 - **Current branch (feat/mlops-tests-ci)**: [codecov.io/gh/arthurcornelio88/bike-count-prediction-app/tree/feat/mlops-tests-ci](https://app.codecov.io/gh/arthurcornelio88/bike-count-prediction-app/tree/feat/mlops-tests-ci)
 - **All branches**: [codecov.io/gh/arthurcornelio88/bike-count-prediction-app](https://app.codecov.io/gh/arthurcornelio88/bike-count-prediction-app)
 
@@ -226,6 +238,7 @@ Our project is integrated with Codecov and shows **68.00% coverage**:
 ### 🎯 Key Features
 
 **What Codecov provides**:
+
 - ✅ **Coverage trends** - Track coverage over time (3 months trend: +68.00%)
 - ✅ **PR coverage diff** - See how each PR affects coverage
 - ✅ **File-level analysis** - Drill down to see which lines are covered/missed
@@ -235,12 +248,14 @@ Our project is integrated with Codecov and shows **68.00% coverage**:
 ### 🔧 Setup (Already Done!)
 
 **Steps completed**:
+
 1. ✅ Signed up at [codecov.io](https://codecov.io)
 2. ✅ Connected GitHub repository
 3. ✅ Configured `.github/workflows/ci.yml` to upload coverage
 4. ✅ Coverage reports uploaded automatically on every push
 
 **Workflow integration** (lines 44-50 in `ci.yml`):
+
 ```yaml
 - name: Upload coverage to Codecov (optional)
   if: github.event_name == 'push'
@@ -254,6 +269,7 @@ Our project is integrated with Codecov and shows **68.00% coverage**:
 ### 📊 Viewing Coverage
 
 **Access methods**:
+
 1. **Direct link (by branch)**:
    - Current branch: [feat/mlops-tests-ci](https://app.codecov.io/gh/arthurcornelio88/bike-count-prediction-app/tree/feat/mlops-tests-ci)
    - All branches: [Repository overview](https://app.codecov.io/gh/arthurcornelio88/bike-count-prediction-app)
@@ -261,10 +277,116 @@ Our project is integrated with Codecov and shows **68.00% coverage**:
 3. **From commit**: Click commit → Checks → Codecov → Details
 
 **What you can see**:
+
 - 📁 **File tree** with color-coded coverage
 - 📈 **Trend charts** (3 months history)
 - 🔍 **Line-by-line** coverage (click on files)
 - 📊 **Components** breakdown (app vs backend)
+
+---
+
+## Pre-commit Hooks
+
+### Overview
+
+Pre-commit hooks run **locally before each commit** to catch issues early. All checks that run in CI also run
+as pre-commit hooks, ensuring consistency between local and CI environments.
+
+### Installation
+
+```bash
+# Install pre-commit hooks
+uv run pre-commit install
+
+# Run manually on all files
+uv run pre-commit run --all-files
+```
+
+### Available Hooks
+
+The project uses 14 pre-commit hooks:
+
+| Hook | Purpose | Auto-fix |
+|------|---------|----------|
+| **ruff** | Python linting | ✅ Yes |
+| **ruff-format** | Python formatting | ✅ Yes |
+| **mypy** | Type checking | ❌ No |
+| **bandit** | Security scanning | ❌ No |
+| **markdownlint** | Documentation quality | ✅ Yes |
+| **trailing-whitespace** | Remove trailing spaces | ✅ Yes |
+| **end-of-file-fixer** | Fix EOF | ✅ Yes |
+| **check-yaml** | YAML syntax | ❌ No |
+| **check-json** | JSON syntax | ❌ No |
+| **check-merge-conflict** | Merge markers | ❌ No |
+| **detect-private-key** | Security check | ❌ No |
+| **check-ast** | Python syntax | ❌ No |
+| **debug-statements** | Debug imports | ❌ No |
+| **check-added-large-files** | File size | ❌ No |
+
+### CI Integration
+
+Pre-commit hooks run **before** tests in the CI pipeline:
+
+```yaml
+jobs:
+  pre-commit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install UV
+        run: pip install uv
+      - name: Install dependencies
+        run: uv sync
+      - name: Run pre-commit
+        run: uv run pre-commit run --all-files
+
+  test:
+    needs: pre-commit  # Tests only run if pre-commit passes
+    # ... test steps
+```
+
+### Helper Script
+
+Use the helper script for quick checks:
+
+```bash
+# Run all checks
+./scripts/run-checks.sh
+
+# Quick mode (skip mypy, bandit)
+./scripts/run-checks.sh --quick
+
+# Auto-fix issues
+./scripts/run-checks.sh --fix
+
+# Verbose output
+./scripts/run-checks.sh --verbose
+```
+
+### Best Practices
+
+**Before committing:**
+
+1. Run pre-commit locally: `uv run pre-commit run --all-files`
+2. Fix any reported issues
+3. Commit and push
+
+**If pre-commit fails:**
+
+- **Ruff errors**: Auto-fixed, review changes with `git diff`
+- **Mypy errors**: Add type hints or use `# type: ignore` comments
+- **Bandit warnings**: Use `# nosec BXXX` for false positives
+- **Markdownlint**: Auto-fixed, or adjust `.markdownlint.yaml`
+
+### Configuration Files
+
+- `.pre-commit-config.yaml` - Pre-commit hook configuration
+- `.markdownlint.yaml` - Markdown linting rules
+- `pyproject.toml` - Ruff, mypy, bandit settings
 
 ---
 
@@ -277,6 +399,7 @@ Our project is integrated with Codecov and shows **68.00% coverage**:
 | **Coverage** | 68.00% |
 | **Python** | 3.12 |
 | **Package Manager** | UV |
+| **Pre-commit Hooks** | 14/14 passing ✅ |
 
 ---
 
@@ -284,7 +407,7 @@ Our project is integrated with Codecov and shows **68.00% coverage**:
 
 - [ ] Add branch protection rules (require CI to pass before merge)
 - [x] Set up Codecov integration
-- [ ] Add code quality checks (linting, type checking)
+- [x] Add code quality checks (linting, type checking) via pre-commit
 - [ ] Add deployment workflow (CD) for Cloud Run
 
 ---

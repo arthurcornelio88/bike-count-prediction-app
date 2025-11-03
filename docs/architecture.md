@@ -13,7 +13,7 @@ Ce projet prédit le **comptage horaire de vélos à Paris** à partir de donné
 
 ## 🏗️ 1. Pipelines de traitement
 
-### ✔️ Nettoyage commun à tous :
+### ✔️ Nettoyage commun à tous
 
 * Classe `RawCleanerTransformer`
 
@@ -23,7 +23,7 @@ Ce projet prédit le **comptage horaire de vélos à Paris** à partir de donné
   * Encode les jours de semaine
   * Nettoie `nom_du_compteur`
 
-### ✔️ Modèles spécifiques :
+### ✔️ Modèles spécifiques
 
 | Pipeline                      | Type                   | Architecture                                                        |
 | ----------------------------- | ---------------------- | ------------------------------------------------------------------- |
@@ -42,7 +42,7 @@ Ce projet prédit le **comptage horaire de vélos à Paris** à partir de donné
 | `dev`  | CSV local (`./data/`)        | `http://127.0.0.1:5000` local + `mlruns_dev/` | Sauvegarde locale dans `./models/`                             |
 | `prod` | Données sur GCS (`gs://...`) | Même MLflow, mais artefacts = GCS             | Export modèle + résumé dans `gs://df_traffic_cyclist1/models/` |
 
-### 📦 Entraînement complet via :
+### 📦 Entraînement complet via
 
 ```bash
 python src/train.py --env prod
@@ -54,7 +54,6 @@ python src/train.py --env prod
 * Met à jour le registre `summary.json`
 
 <img src="img/1.png" alt="Artifacts in prod" width="600" />
-
 
 ### 2.5 🗄️ MLflow Tracking : `mlruns` en local vs GCP
 
@@ -73,7 +72,7 @@ Le projet distingue deux environnements bien isolés :
 
   * Tous les runs sont sauvegardés dans le dossier local :
 
-    ```
+    ```text
     ./mlruns_dev/
     └── <experiment_id>/
         └── <run_id>/
@@ -84,7 +83,7 @@ Le projet distingue deux environnements bien isolés :
 
   * Les artefacts générés (modèles, logs) sont stockés dans :
 
-    ```
+    ```text
     ./mlruns_dev/<experiment_id>/<run_id>/artifacts/
     ```
 
@@ -98,7 +97,7 @@ Le projet distingue deux environnements bien isolés :
 
   * Les métadonnées sont toujours stockées localement :
 
-    ```
+    ```text
     ./mlruns_prod/
     ```
 
@@ -106,7 +105,7 @@ Le projet distingue deux environnements bien isolés :
 
   * Les fichiers artefacts sont stockés dans :
 
-    ```
+    ```text
     gs://df_traffic_cyclist1/mlruns/<experiment_id>/<run_id>/artifacts/
     ```
 
@@ -120,7 +119,7 @@ Le projet distingue deux environnements bien isolés :
 
 Qu'on soit en `dev` ou `prod`, les expériences apparaissent dans **la même interface MLflow UI**, par exemple :
 
-```
+```text
 http://127.0.0.1:5000/#/experiments/0
 ```
 
@@ -133,7 +132,7 @@ La différence se fait dans le **chemin d’accès aux artefacts** affiché :
 
 ## 📚 3. Registre de modèles (`summary.json`)
 
-### Format :
+### Format
 
 ```json
 {
@@ -150,7 +149,7 @@ La différence se fait dans le **chemin d’accès aux artefacts** affiché :
 
 🧠 C’est un historique **append-only** qui stocke tous les modèles entraînés en `prod`.
 
-### ✨ Géré automatiquement par :
+### ✨ Géré automatiquement par
 
 ```python
 update_summary(...)
@@ -166,7 +165,7 @@ L'application Streamlit (et n’importe quel consumer) peut charger le **meilleu
 * du `metric` (`r2`, `f1_score`, etc.)
 * de l’`env` et du `test_mode`
 
-### Chargement via :
+### Chargement via
 
 ```python
 from app.model_registry_summary import get_best_model_from_summary
@@ -180,20 +179,21 @@ pipeline = get_best_model_from_summary(
 )
 ```
 
-💡 Il télécharge les artefacts depuis GCS dans `/tmp/`, détecte automatiquement les bons sous-dossiers (`rf/`, `nn/`, etc.), et recharge le bon modèle via `.load()`.
+💡 Il télécharge les artefacts depuis GCS dans `/tmp/`, détecte automatiquement les bons
+sous-dossiers (`rf/`, `nn/`, etc.), et recharge le bon modèle via `.load()`.
 
 ---
 
 ## 🎛️ 5. Application Streamlit
 
-### ✅ Fonctionnalités :
+### ✅ Fonctionnalités
 
 * Choix entre `Random Forest`, `Neural Net`, `RF Classifier (Affluence)`
 * Mode prédiction manuelle ou batch CSV
 * Téléchargement du fichier de prédiction
 * Chargement des modèles en cache depuis `summary.json`
 
-### 🔒 Sécurité :
+### 🔒 Sécurité
 
 * Les credentials GCP sont automatiquement injectés depuis `st.secrets` ou une variable d’environnement
 

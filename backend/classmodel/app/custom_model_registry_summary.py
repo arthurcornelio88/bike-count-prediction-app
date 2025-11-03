@@ -1,10 +1,11 @@
 import os
 import json
 import uuid
+import subprocess
+import tempfile
 from typing import Optional
 import datetime
 from urllib.request import urlopen
-import app.app_config as _  # forcer le sys.path side effect
 from app.classes import AffluenceClassifierPipeline
 
 
@@ -20,7 +21,7 @@ def update_summary(
     accuracy: float = None,
     precision: float = None,
     recall: float = None,
-    f1_score: float = None
+    f1_score: float = None,
 ):
     entry = {
         "timestamp": datetime.datetime.utcnow().isoformat(),
@@ -31,18 +32,34 @@ def update_summary(
         "model_uri": model_uri,
     }
 
-    if rmse is not None: entry["rmse"] = rmse
-    if r2 is not None: entry["r2"] = r2
-    if accuracy is not None: entry["accuracy"] = accuracy
-    if precision is not None: entry["precision"] = precision
-    if recall is not None: entry["recall"] = recall
-    if f1_score is not None: entry["f1_score"] = f1_score
+    if rmse is not None:
+        entry["rmse"] = rmse
+    if r2 is not None:
+        entry["r2"] = r2
+    if accuracy is not None:
+        entry["accuracy"] = accuracy
+    if precision is not None:
+        entry["precision"] = precision
+    if recall is not None:
+        entry["recall"] = recall
+    if f1_score is not None:
+        entry["f1_score"] = f1_score
 
-    summary_path_local = "/tmp/summary.json" if summary_path.startswith("gs://") else summary_path
+    summary_path_local = (
+        os.path.join(tempfile.gettempdir(), "summary.json")
+        if summary_path.startswith("gs://")
+        else summary_path
+    )
     summary = []
 
     if summary_path.startswith("gs://"):
-        os.system(f"gsutil cp {summary_path} {summary_path_local} || touch {summary_path_local}")
+        subprocess.run(  # noqa: S603
+            ["gsutil", "cp", summary_path, summary_path_local],
+            check=False,
+            capture_output=True,
+        )
+        if not os.path.exists(summary_path_local):
+            open(summary_path_local, "a").close()  # noqa: PTH123
     if os.path.exists(summary_path_local):
         with open(summary_path_local, "r") as f:
             try:
@@ -57,7 +74,7 @@ def update_summary(
         json.dump(summary, f, indent=2)
 
     if summary_path.startswith("gs://"):
-        os.system(f"gsutil cp {summary_path_local} {summary_path}")
+        subprocess.run(["gsutil", "cp", summary_path_local, summary_path], check=True)  # noqa: S603
         print(f"✅ summary.json mis à jour et uploadé vers {summary_path}")
     else:
         print(f"✅ summary.json mis à jour localement : {summary_path}")
@@ -68,35 +85,40 @@ def get_best_model_from_summary(
     summary_path: str,
     env: str = "prod",
     metric: str = "rmse",
-    test_mode: Optional[bool] = False
+    test_mode: Optional[bool] = False,
 ):
     if summary_path.startswith("gs://"):
         summary = _read_gcs_json(summary_path)
     elif summary_path.startswith("http"):
-        with urlopen(summary_path) as f:
+        with urlopen(summary_path) as f:  # nosec B310
             summary = json.load(f)
     else:
         with open(summary_path, "r") as f:
             summary = json.load(f)
 
     print(f"⏳ Étape 1 – Lecture du résumé depuis {summary_path}")
-    print(f"⏳ Étape 2 – Filtrage sur model_type={model_type}, env={env}, test_mode={test_mode}")
+    print(
+        f"⏳ Étape 2 – Filtrage sur model_type={model_type}, env={env}, test_mode={test_mode}"
+    )
 
     filtered = [
-        r for r in summary
+        r
+        for r in summary
         if r["model_type"] == model_type
         and r["env"] == env
         and r["test_mode"] == test_mode
     ]
 
     if not filtered:
-        raise RuntimeError(f"Aucun modèle trouvé pour type={model_type}, env={env}, test_mode={test_mode}")
+        raise RuntimeError(
+            f"Aucun modèle trouvé pour type={model_type}, env={env}, test_mode={test_mode}"
+        )
 
     metric_sorting = {
         "rmse": lambda r: -r["rmse"],
         "r2": lambda r: r["r2"],
         "f1_score": lambda r: r.get("f1_score", -1),
-        "accuracy": lambda r: r.get("accuracy", -1)
+        "accuracy": lambda r: r.get("accuracy", -1),
     }
 
     if metric not in metric_sorting:
@@ -107,7 +129,9 @@ def get_best_model_from_summary(
     print(f"⏳ Étape 3 – Téléchargement depuis GCS : {best['model_uri']}")
 
     value = best.get(metric, "N/A")
-    print(f"✅ Modèle {model_type} sélectionné : {best.get('run_id', 'N/A')} ({metric}={value})")
+    print(
+        f"✅ Modèle {model_type} sélectionné : {best.get('run_id', 'N/A')} ({metric}={value})"
+    )
 
     local_model_path = _download_gcs_dir(best["model_uri"], prefix=model_type)
     print(f"⏳ Étape 4 – Chargement du modèle depuis {local_model_path}")
@@ -130,10 +154,12 @@ def _download_gcs_dir(gcs_uri: str, prefix="model") -> str:
     from google.cloud import storage
 
     bucket_name, path = gcs_uri.replace("gs://", "").split("/", 1)
-    local_tmp_dir = f"/tmp/{prefix}_{uuid.uuid4().hex}"
+    local_tmp_dir = os.path.join(tempfile.gettempdir(), f"{prefix}_{uuid.uuid4().hex}")
     os.makedirs(local_tmp_dir, exist_ok=True)
 
-    print(f"🔐 Credentials utilisés : {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}")
+    print(
+        f"🔐 Credentials utilisés : {os.environ.get('GOOGLE_APPLICATION_CREDENTIALS')}"
+    )
     client = storage.Client()
     blobs = list(client.list_blobs(bucket_name, prefix=path))
 
@@ -164,7 +190,9 @@ def _read_gcs_json(gs_path: str) -> dict:
     from google.cloud import storage
 
     if not os.environ.get("GOOGLE_APPLICATION_CREDENTIALS"):
-        raise EnvironmentError("Variable GOOGLE_APPLICATION_CREDENTIALS non définie pour accéder à GCS")
+        raise EnvironmentError(
+            "Variable GOOGLE_APPLICATION_CREDENTIALS non définie pour accéder à GCS"
+        )
 
     bucket_name, blob_path = gs_path.replace("gs://", "").split("/", 1)
     client = storage.Client()

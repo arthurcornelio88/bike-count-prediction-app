@@ -26,6 +26,7 @@ This project uses **DVC (Data Version Control)** to version datasets with GCS (G
 | **current_data.csv** | ≥ 2025-01-14 | 287,604 (30.3%) | Drift detection & validation |
 
 **Rationale**:
+
 - **Reference data** (7 months): Used for model training with train/test split
 - **Current data** (3 months): Simulates production data for drift monitoring
 
@@ -66,6 +67,7 @@ cat .dvc/config
 ```
 
 Expected output:
+
 ```ini
 [core]
     remote = gcs_storage
@@ -99,6 +101,7 @@ dvc add data/current_data.csv
 ```
 
 This creates `.dvc` metadata files (versioned in Git):
+
 - `data/reference_data.csv.dvc`
 - `data/current_data.csv.dvc`
 
@@ -145,21 +148,25 @@ dvc pull data/reference_data.csv.dvc
 ## 🔧 Common Commands
 
 ### Check DVC status
+
 ```bash
 dvc status
 ```
 
 ### List tracked files
+
 ```bash
 dvc list . data/
 ```
 
 ### Show file info
+
 ```bash
 dvc get . data/reference_data.csv.dvc
 ```
 
 ### Update remote credentials
+
 ```bash
 dvc remote modify gcs_storage credentialpath ./mlflow-trainer.json
 ```
@@ -168,7 +175,7 @@ dvc remote modify gcs_storage credentialpath ./mlflow-trainer.json
 
 ## 📂 File Structure
 
-```
+```text
 .
 ├── .dvc/
 │   ├── .gitignore          # DVC internal files

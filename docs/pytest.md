@@ -10,7 +10,7 @@ This project uses **pytest** for automated testing of ML pipelines, preprocessin
 
 ## 📁 Test Structure
 
-```
+```text
 tests/
 ├── conftest.py              # Shared fixtures and configuration
 ├── test_pipelines.py        # ML pipeline tests (RF, NN) - 13 tests ✅
@@ -26,26 +26,31 @@ pytest.ini                   # Pytest configuration
 ## 🚀 Running Tests
 
 ### Run all tests
+
 ```bash
 pytest tests/ -v
 ```
 
 ### Run specific test file
+
 ```bash
 pytest tests/test_pipelines.py -v
 ```
 
 ### Run specific test class
+
 ```bash
 pytest tests/test_pipelines.py::TestRFPipeline -v
 ```
 
 ### Run specific test function
+
 ```bash
 pytest tests/test_pipelines.py::TestRFPipeline::test_rf_pipeline_fit -v
 ```
 
 ### Run with coverage (targeted)
+
 ```bash
 # Coverage for ML pipelines and transformers (app/classes.py)
 pytest tests/test_pipelines.py tests/test_preprocessing.py --cov=app.classes --cov-report=html --cov-report=term-missing
@@ -69,6 +74,7 @@ htmlcov/
 ```
 
 **How to view**:
+
 ```bash
 # After running coverage command
 open htmlcov/index.html  # macOS
@@ -77,12 +83,14 @@ start htmlcov/index.html  # Windows
 ```
 
 **What you'll see**:
+
 - 🟢 **Green lines**: Covered by tests
 - 🔴 **Red lines**: Not covered by tests
 - **Coverage percentage** per file and per function
 - **Missing line numbers** for uncovered code
 
 **Current coverage** (targeted files):
+
 - `app/classes.py`: **73.42%** (excludes legacy AffluenceClassifierPipeline)
 - `backend.regmodel.app.model_registry_summary.py`: **56.31%** (GCS functions mocked)
 - **Overall**: **68.00%**
@@ -134,16 +142,6 @@ start htmlcov/index.html  # Windows
 ## 📋 Test Cases Breakdown
 
 ### 1️⃣ **TestRFPipeline** (Random Forest)
-**Status**: 6/6 tests passing ✅
-**Execution time**: ~5 seconds
-**Coverage**: summary.json logic (update_summary, get_best_model_from_summary)
-
-![Pytest Model Registry Results](img/pytest_model_registry_results.png)
----
-
-## 📋 Test Cases Breakdown
-
-### 1️⃣ **TestRFPipeline** (Random Forest)
 
 | Test | Description | Assertions |
 |------|-------------|------------|
@@ -154,6 +152,7 @@ start htmlcov/index.html  # Windows
 | `test_rf_pipeline_save_load` | Verify model persistence | Save/load cycle preserves predictions |
 
 **Key validations**:
+
 - ✅ Pipeline accepts raw bike traffic data
 - ✅ Preprocessing (cleaner, feature engineering) works
 - ✅ Predictions are non-negative (bike counts)
@@ -173,6 +172,7 @@ start htmlcov/index.html  # Windows
 | `test_nn_pipeline_model_architecture` | Validate model structure | 2 inputs (compteur_id + features), params > 0 |
 
 **Key validations**:
+
 - ✅ NN pipeline with embedding layer works
 - ✅ Custom hyperparameters (embedding_dim) configurable
 - ✅ Keras model saved as `.keras` format
@@ -188,6 +188,7 @@ start htmlcov/index.html  # Windows
 | `test_nn_pipeline_with_different_batch_sizes` | Test NN with batch_size=[16,32,64] | All batch sizes work correctly |
 
 **Key validations**:
+
 - ✅ Pipelines robust to small datasets
 - ✅ NN flexible with batch size variations
 
@@ -207,6 +208,7 @@ start htmlcov/index.html  # Windows
 | `test_transformer_fit_transform_idempotent` | Test reproducibility | Same result on re-run |
 
 **Key validations**:
+
 - ✅ Column standardization (lowercase, underscores)
 - ✅ Datetime parsing with timezone (Europe/Paris)
 - ✅ Geographic coordinates extraction (lat/lon)
@@ -227,6 +229,7 @@ start htmlcov/index.html  # Windows
 | `test_transformer_with_pipeline` | Test in sklearn Pipeline | Works after RawCleaner |
 
 **Key validations**:
+
 - ✅ Cyclical encoding for hour (sin/cos 24h cycle)
 - ✅ Cyclical encoding for month (sin/cos 12-month cycle)
 - ✅ Year mapping (2024→0, 2025→1)
@@ -243,6 +246,7 @@ start htmlcov/index.html  # Windows
 | `test_raw_cleaner_column_order_consistency` | Test column order consistency | Same column order regardless of input order |
 
 **Key validations**:
+
 - ✅ Handles missing/null coordinates gracefully
 - ✅ Boundary hour values processed correctly
 - ✅ Consistent column ordering
@@ -258,6 +262,7 @@ start htmlcov/index.html  # Windows
 | `test_predict_with_single_record` | Test single record prediction | Status 200, ≥ 1 prediction returned |
 
 **Key validations**:
+
 - ✅ `/predict` endpoint returns 200 status
 - ✅ Predictions are numeric and non-negative
 - ✅ Supports both RF and NN models
@@ -274,6 +279,7 @@ start htmlcov/index.html  # Windows
 | `test_invalid_json_format` | Test invalid JSON payload | Status 422 |
 
 **Key validations**:
+
 - ✅ Required fields validated (records, model_type)
 - ✅ Invalid JSON rejected with 422
 - ✅ Pydantic schema enforcement
@@ -287,6 +293,7 @@ start htmlcov/index.html  # Windows
 | `test_predict_with_invalid_model_type` | Test invalid model_type value | Status 500, error detail in response |
 
 **Key validations**:
+
 - ✅ Invalid model_type returns 500 with detail
 
 ---
@@ -300,6 +307,7 @@ start htmlcov/index.html  # Windows
 | `test_predictions_count_matches_input` | Test output count matches input | len(predictions) == len(records) |
 
 **Key validations**:
+
 - ✅ Response format consistency
 - ✅ Predictions count matches input records
 - ✅ All predictions are numeric
@@ -316,6 +324,7 @@ start htmlcov/index.html  # Windows
 | `test_update_summary_handles_corrupted_json` | Test corrupted JSON handling | Reinitializes summary, adds new entry |
 
 **Key validations**:
+
 - ✅ Creates new summary.json files
 - ✅ Appends to existing summaries
 - ✅ Handles all metric types (regression + classification)
@@ -331,6 +340,7 @@ start htmlcov/index.html  # Windows
 | `test_get_best_model_by_rmse` | Select best model by rmse (lowest) | Selects model with rmse=10.0 (lowest) |
 
 **Key validations**:
+
 - ✅ Selects best model by r2 (maximization)
 - ✅ Selects best model by rmse (minimization)
 - ✅ Filters by model_type, env, test_mode
@@ -391,6 +401,7 @@ markers =
 **GitHub Actions** automatically runs all tests on every push and PR.
 
 **Quick facts**:
+
 - ✅ 47 tests run automatically
 - ✅ Coverage report: 68.00%
 - ✅ Uses **UV** for fast dependency installation
@@ -416,14 +427,18 @@ markers =
 | **Coverage** (overall) | 68.00% |
 
 **Breakdown by file**:
+
 - `test_pipelines.py`: 13 tests (~20s)
 - `test_preprocessing.py`: 17 tests (~5s)
 - `test_api_regmodel.py`: 11 tests (~9s)
 - `test_model_registry.py`: 6 tests (~5s)
 
 **Coverage breakdown** (targeted files):
-- `app/classes.py`: **73.42%** - RFPipeline, NNPipeline, Transformers (excludes legacy AffluenceClassifierPipeline)
-- `backend.regmodel.app.model_registry_summary.py`: **56.31%** - update_summary(), get_best_model_from_summary() (GCS functions mocked)
+
+- `app/classes.py`: **73.42%** - RFPipeline, NNPipeline, Transformers (excludes legacy
+  AffluenceClassifierPipeline)
+- `backend.regmodel.app.model_registry_summary.py`: **56.31%** - update_summary(),
+  get_best_model_from_summary() (GCS functions mocked)
 - **Overall**: **68.00%**
 
 ### Next Steps

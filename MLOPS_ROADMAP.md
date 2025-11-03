@@ -1,7 +1,7 @@
 # 🎯 MLOps Roadmap — Bike Traffic Prediction
 
-**Date limite soutenance** : 7 novembre 2025
-**Branche principale** : `feat/mlops-integration`
+- **Date limite soutenance** : 7 novembre 2025
+- **Branche principale** : `feat/mlops-integration`
 
 ---
 
@@ -28,6 +28,7 @@
 📚 **Full documentation**: [docs/dvc.md](docs/dvc.md)
 
 **Deliverables** ✅:
+
 - ✅ Temporal split: reference (660K rows, 69.7%) + current (288K rows, 30.3%)
 - ✅ DVC tracking with GCS remote storage
 - ✅ `scripts/split_data_temporal.py` implemented
@@ -39,10 +40,12 @@
 **Implementation completed** ✅
 
 📚 **Full documentation**:
+
 - [docs/pytest.md](docs/pytest.md) - Complete test suite
 - [docs/ci.md](docs/ci.md) - CI/CD with GitHub Actions + Codecov
 
 **Deliverables** ✅:
+
 - ✅ **47 tests** passing (13 pipelines + 17 preprocessing + 11 API + 6 registry)
 - ✅ **68% coverage** (app/classes: 73.42%, model_registry: 56.31%)
 - ✅ GitHub Actions CI configured with **UV**
@@ -50,7 +53,8 @@
 - ✅ Coverage artifacts (HTML reports, 30 days retention)
 
 **Files created**:
-```
+
+```text
 tests/
 ├── test_pipelines.py          ✅ 13 tests (RF, NN)
 ├── test_preprocessing.py      ✅ 17 tests (transformers)
@@ -68,59 +72,54 @@ pytest.ini                     ✅ Configuration
 
 **Implementation completed** ✅
 
-📚 **Documentation**: [docs/backend.md](docs/backend.md#train---train-and-upload-model)
+📚 **Documentation**:
+
+- [docs/backend.md](docs/backend.md#train---train-and-upload-model)
+- [docs/training_strategy.md](docs/training_strategy.md) — Hybrid training workflow
+- [docs/mlflow_cloudsql.md](docs/mlflow_cloudsql.md) — Cloud SQL setup
 
 **Objectifs** :
+
 - ✅ Refactor training logic into unified `train_model()` function
 - ✅ Create FastAPI `/train` endpoint for remote training
 - ✅ Integrate MLflow tracking in docker-compose stack
+- ✅ **MLflow Cloud SQL backend** for centralized team collaboration
 - ✅ Support DVC-tracked datasets (reference/current)
 - ✅ Automatic GCS upload + `summary.json` update
 
 **Deliverables** ✅:
+
 - ✅ `train_model()` function in [train.py:256](backend/regmodel/app/train.py#L256)
-- ✅ `/train` endpoint in [fastapi_app.py:101](backend/regmodel/app/fastapi_app.py#L101)
-- ✅ Docker Compose with RegModel API + MLflow server
+- ✅ Docker Compose MLflow server + Cloud SQL Proxy
+- ✅ **Cloud SQL PostgreSQL** backend (`mlflow-metadata` instance)
 - ✅ UV-optimized Dockerfile ([backend/regmodel/Dockerfile](backend/regmodel/Dockerfile))
 - ✅ Dedicated pyproject.toml for RegModel service
 - ✅ MLflow tracking already integrated in `train_rf()`, `train_nn()`, `train_rfc()`
 
 **Architecture**:
+
 ```yaml
 services:
+  cloud-sql-proxy:
+    - Proxies connection to Cloud SQL PostgreSQL
+    - Instance: datascientest-460618:europe-west3:mlflow-metadata
+    - Requires: roles/cloudsql.client on service account
+
   mlflow:
     - Tracking server on port 5000
-    - Backend store: ./mlruns_dev
-    - Artifacts: ./mlflow_artifacts
-    - Healthcheck enabled
-
-  regmodel-backend:
-    - FastAPI on port 8000
-    - Depends on MLflow (healthcheck)
-    - Mounts: code, GCS credentials, data
-    - Hot reload enabled (dev mode)
-```
-
-**API Usage**:
-```bash
-# Train RF model on reference data
-curl -X POST "http://localhost:8000/train" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model_type": "rf",
-    "data_source": "reference",
-    "env": "prod"
-  }'
-
-# Response includes: run_id, metrics, model_uri
+    - Backend store: Cloud SQL PostgreSQL (metadata)
+    - Artifact store: gs://df_traffic_cyclist1/mlflow-artifacts/
+    - Benefits: Shared team tracking, persistent, scalable
 ```
 
 **Supported models**:
+
 - `rf`: Random Forest regressor
 - `nn`: Neural Network regressor
 - `rf_class`: Random Forest classifier (affluence detection)
 
 **Métriques trackées** (aligné avec `summary.json`) :
+
 - **Régression (RF, NN)** : `r2_train`, `rmse_train`
 - **Classification (RFC)** : `accuracy`, `precision`, `recall`, `f1_score`
 - **Hyperparams** :
@@ -128,404 +127,520 @@ curl -X POST "http://localhost:8000/train" \
   - NN: `embedding_dim`, `batch_size`, `epochs`, `total_params`
 
 **Validation completed** ✅:
-- ✅ Full stack tested: `docker compose up` works
-- ✅ MLflow UI accessible at http://localhost:5000
-- ✅ `/train` endpoint tested with RF, NN models
-- ✅ Test mode (`test_mode=true`) working with `test_sample.csv` (6s for NN, ~30s for RF)
+
+- ✅ MLflow stack : `docker compose up` works
+- ✅ MLflow UI accessible at <http://localhost:5000>
+- ✅ Cloud SQL proxy connection verified (europe-west3)
+- ✅ Service account permissions configured (`roles/cloudsql.client`)
+- ✅ Test mode (`test_mode=true`) working with `test_sample.csv`
 - ✅ Metrics correctly returned in API response (RMSE, R²)
-- ✅ MLflow tracking confirmed (runs, metrics, tags, artifacts)
+- ✅ MLflow tracking confirmed (runs, metrics, tags, artifacts to GCS)
+
+#### **2.4 Test `/train` Endpoint** ✅
+
+**Status**: ✅ Complete - Endpoint tested and working in docker-compose stack
+
+**Quick Test:**
+
+```bash
+# Test with docker-compose stack
+docker compose up -d
+curl -X POST "http://localhost:8000/train" \
+  -H "Content-Type: application/json" \
+  -d '{"model_type":"rf","data_source":"baseline","test_mode":true,"env":"dev"}'
+```
+
+**Expected Response**: JSON with `run_id`, `metrics` (rmse, r2), and `model_uri`
+
+**Verification Checklist:**
+
+- ✅ `/train` endpoint working in docker-compose stack
+- ✅ MLflow tracking to Cloud SQL backend
+- ✅ Artifacts stored in GCS (`gs://df_traffic_cyclist1/mlflow-artifacts/`)
+- ✅ `summary.json` appended to GCS
+- ✅ Test mode (`test_mode=true`) working with fast training
+
+**Ready for**: Airflow DAG 3 (`dag_monitor_and_train.py`) integration
 
 ---
 
-### **Phase 3 : Orchestration Airflow + Réentraînement intelligent** (`feat/mlops-airflow-pipeline`)
+### **Phase 3 : Orchestration Airflow + Monitoring Production** (`feat/mlops-airflow-pipeline`)
 
-**Objectifs** :
-- Pipeline automatisé end-to-end
-- Logique de réentraînement conditionnel
-- Scheduling hebdomadaire
+**Status**: ✅ COMPLETE (All 3 DAGs Operational)
 
-**DAG Airflow avec branchement** :
+**Progress Summary:**
+
+- ✅ MLflow Cloud SQL backend configured (team collaboration enabled)
+- ✅ Airflow stack deployed via docker-compose (WSL2 + Mac multi-platform support)
+- ✅ **DAG 1/3 COMPLETE**: `dag_daily_fetch_data.py` - Data ingestion with deduplication
+- ✅ **DAG 2/3 COMPLETE**: `dag_daily_prediction.py` - ML predictions with drift handling
+- ✅ **DAG 3/3 COMPLETE**: `dag_monitor_and_train.py` - Intelligent monitoring with hybrid drift strategy
+- ✅ BigQuery datasets: `bike_traffic_raw` (raw data), `bike_traffic_predictions` (predictions), `monitoring_audit` (logs)
+- ✅ BigQuery partitioned table architecture implemented (`comptage_velo`)
+- ✅ Data drift handling in ML API (unknown compteurs fallback)
+- ✅ Schema drift resolution with column normalization
+- ✅ Hybrid drift management strategy (proactive + reactive triggers)
+- ⏳ Prometheus + Grafana monitoring pending (optional)
+
+**Objectifs unifiés** :
+
+- 🔄 Pipeline automatisé end-to-end avec Airflow
+- 📊 Monitoring avec BigQuery (raw, predictions, audit)
+- 🔍 Drift detection avec Evidently
+- 🎯 Réentraînement intelligent via endpoint `/train` (fine-tuning)
+- 📈 Métriques API avec Prometheus + Grafana
+- 🔒 Sécurité API (API Key + Rate Limiting)
+
+**Data Strategy** (Updated 2025-10-11) ✅:
+
+After data quality validation, we identified that all data sources (reference_data.csv,
+current_data.csv, current_api_data.csv) are from the same origin (Paris Open Data historical
+exports) with perfect correlation (r=1.0, MAE=0).
+
+**Final Decision**: Use `current_api_data.csv` (905k records, 2024-09-01 → 2025-10-10) as unified baseline:
+
+- 80% Train: ~724k records (2024-09 → 2025-08)
+- 20% Test: ~181k records (2025-08 → 2025-10)
+- Live API ingestion starting 2025-10-11 (cutoff date)
+- Weekly drift detection + conditional fine-tuning
+
+📚 **Full documentation**: [docs/fetch_data_strategy.md](docs/fetch_data_strategy.md)
+
+---
+
+#### **3.1 Data Preparation & Baseline** ✅
+
+**Baseline Creation**:
+
+```bash
+# Split current_api_data.csv into train/test (80/20 split)
+python scripts/split_data_temporal.py
+
+# Output:
+# - data/train_baseline.csv (~724k records, 2024-09-01 → 2025-08-15)
+# - data/test_baseline.csv (~181k records, 2025-08-16 → 2025-10-10)
+```
+
+**GCS Upload** (baseline for champion model training):
+
+```bash
+# Upload train_baseline.csv to GCS
+gsutil -m cp data/train_baseline.csv gs://<your-bucket>/data/train_baseline.csv
+
+# Verify upload
+gsutil ls -lh gs://<your-bucket>/data/
+```
+
+**DVC Tracking** (optional - for local versioning):
+
+```bash
+dvc add data/train_baseline.csv data/test_baseline.csv
+dvc push
+git add data/*.dvc .dvc/config
+git commit -m "chore: add new baseline from current_api_data"
+```
+
+---
+
+#### **3.1.5 Training Strategy** (Hybrid Architecture)
+
+**Architecture**: Local champion training + Production fine-tuning
+
+| Component | Where | When | Data Size | Duration |
+|-----------|-------|------|-----------|----------|
+| **Champion Training** | 💻 Local | One-time (+ quarterly) | 724k records | 15-30 min |
+| **Fine-Tuning** | ☁️ Production | Weekly (if drift) | 2k records | 5-10 min |
+| **Evaluation** | ☁️ Production | Weekly | 181k test set | 2-3 min |
+| **Inference** | ☁️ Production | Daily | 100 records | <1 sec |
+
+**Workflow**:
+
+```text
+┌─────────────────────────────────────────────────────────┐
+│ INITIAL SETUP (Local - One Time)                       │
+├─────────────────────────────────────────────────────────┤
+│ 1. Train champion_v1 on train_baseline.csv (local)     │
+│ 2. Evaluate on test_baseline.csv → MAE: ~12            │
+│ 3. Upload to GCS + MLflow registry                     │
+│ 4. Deploy to Cloud Run API                             │
+└─────────────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────────────┐
+│ PRODUCTION (Weekly DAG)                                 │
+├─────────────────────────────────────────────────────────┤
+│ 1. Fetch last 7 days from BigQuery                     │
+│ 2. Drift detection (Evidently vs test_baseline)        │
+│ 3. If NO drift → skip, keep champion                   │
+│ 4. If drift → fine-tune on last 30 days                │
+│ 5. Evaluate challenger on SAME test_baseline.csv       │
+│ 6. Champion/Challenger decision (5% threshold)         │
+│ 7. Log metrics to monitoring_audit.logs                │
+└─────────────────────────────────────────────────────────┘
+                        ↓
+┌─────────────────────────────────────────────────────────┐
+│ QUARTERLY RETRAIN (Local - Every 3 months)             │
+├─────────────────────────────────────────────────────────┤
+│ 1. Download all BigQuery data (3 months)               │
+│ 2. Merge with train_baseline.csv → new_train.csv       │
+│ 3. Retrain champion_v2 locally (full training)         │
+│ 4. Evaluate on SAME test_baseline.csv                  │
+│ 5. If improved → deploy as new champion                │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Key Decisions**:
+
+- **Local training**: Full champion model on complete baseline (724k records)
+- **Production fine-tuning**: Lightweight adaptation on recent data (30 days, ~2k records)
+- **Fixed test set**: Always evaluate on same test_baseline.csv for valid comparison
+- **Champion/Challenger**: Promote only if 5% MAE improvement on test set
+
+📚 **Full strategy**: [docs/training_strategy.md](docs/training_strategy.md)
+
+---
+
+#### **3.2 Architecture BigQuery** ✅
+
+**3 Datasets pour traçabilité complète** :
+
+```yaml
+# Structure BigQuery
+datascientest-460618:
+  bike_traffic_raw:           # ✅ Données brutes (IMPLEMENTED)
+    - comptage_velo           # ✅ Table unique partitionnée par date
+
+  bike_traffic_predictions:   # ⏳ Prédictions quotidiennes (PENDING)
+    - daily_YYYYMMDD          # Prédictions + scores de confiance
+    - prediction_ts           # Timestamp de prédiction
+
+  monitoring_audit:           # ⏳ Logs de monitoring (PENDING)
+    - logs                    # Audit complet (drift, AUC, fine-tuning)
+```
+
+**Schema des tables** :
 
 ```python
-# dags/ml_pipeline_dag.py
+# ✅ bike_traffic_raw.comptage_velo (IMPLEMENTED)
+# Single partitioned table (NOT daily tables)
+{
+    "comptage_horaire": INTEGER,               # Hourly bike count
+    "date_et_heure_de_comptage": TIMESTAMP,    # Date/time (PARTITION FIELD)
+    "identifiant_du_compteur": STRING,         # Counter ID (CLUSTERING FIELD)
+    "nom_du_compteur": STRING,                 # Counter name
+    "latitude": FLOAT,                         # GPS latitude (extracted from coordinates)
+    "longitude": FLOAT,                        # GPS longitude (extracted from coordinates)
+    "ingestion_ts": TIMESTAMP                  # When record was ingested
+}
+# Partitioning: Daily partitions on date_et_heure_de_comptage
+# Clustering: By identifiant_du_compteur for efficient queries
+# Write mode: APPEND with deduplication logic
 
-from airflow import DAG
-from airflow.operators.python import PythonOperator, BranchPythonOperator
-from airflow.operators.empty import EmptyOperator
-from datetime import datetime, timedelta
-
-default_args = {
-    'owner': 'mlops-team',
-    'retries': 1,
-    'retry_delay': timedelta(minutes=5),
+# ⏳ bike_traffic_predictions.daily_YYYYMMDD (PENDING - DAG 2)
+{
+    "comptage_horaire": INTEGER,          # Valeur réelle (si disponible)
+    "prediction": FLOAT,                   # Prédiction du modèle
+    "model_type": STRING,                  # rf, nn, rf_class
+    "model_version": STRING,               # Timestamp du modèle
+    "prediction_ts": TIMESTAMP
 }
 
-with DAG(
-    'bike_traffic_ml_pipeline',
-    default_args=default_args,
-    schedule_interval='@weekly',
-    start_date=datetime(2024, 10, 1),
-    catchup=False
-) as dag:
-
-    # 1️⃣ Récupération données current (DVC)
-    def fetch_current_data(**context):
-        import subprocess
-        subprocess.run(['dvc', 'pull', 'data/current_data.csv.dvc'])
-        context['ti'].xcom_push(key='current_path', value='data/current_data.csv')
-
-    fetch_data = PythonOperator(
-        task_id='fetch_current_data',
-        python_callable=fetch_current_data
-    )
-
-    # 2️⃣ Prédiction sur données current
-    def predict_on_current(**context):
-        from app.model_registry_summary import get_best_model_from_summary
-        import pandas as pd
-
-        model = get_best_model_from_summary(
-            model_type="rf",
-            metric="r2",
-            summary_path="gs://df_traffic_cyclist1/models/summary.json"
-        )
-
-        df = pd.read_csv(context['ti'].xcom_pull(key='current_path'))
-        df['prediction'] = model.predict(df)
-        df.to_csv('/tmp/predictions.csv', index=False)
-        context['ti'].xcom_push(key='predictions_path', value='/tmp/predictions.csv')
-
-    predict = PythonOperator(
-        task_id='predict_on_current',
-        python_callable=predict_on_current
-    )
-
-    # 3️⃣ Évaluation métriques + décision
-    def evaluate_and_decide(**context):
-        import pandas as pd
-        import numpy as np
-        from sklearn.metrics import mean_squared_error, r2_score
-
-        df = pd.read_csv(context['ti'].xcom_pull(key='predictions_path'))
-        y_true = df['Comptage horaire']
-        y_pred = df['prediction']
-
-        rmse = np.sqrt(mean_squared_error(y_true, y_pred))
-        r2 = r2_score(y_true, y_pred)
-
-        # Seuils de dégradation
-        RMSE_THRESHOLD = 60.0
-        R2_THRESHOLD = 0.65
-
-        context['ti'].xcom_push(key='metrics', value={'rmse': rmse, 'r2': r2})
-
-        if rmse > RMSE_THRESHOLD or r2 < R2_THRESHOLD:
-            print(f"⚠️ Métriques dégradées : RMSE={rmse:.2f}, R²={r2:.4f}")
-            return 'retrain_models'
-        else:
-            print(f"✅ Métriques OK : RMSE={rmse:.2f}, R²={r2:.4f}")
-            return 'skip_training'
-
-    evaluate = BranchPythonOperator(
-        task_id='evaluate_metrics',
-        python_callable=evaluate_and_decide
-    )
-
-    # 4️⃣ Réentraînement (si dégradation)
-    def retrain_models(**context):
-        import subprocess
-
-        # Pull reference data (DVC)
-        subprocess.run(['dvc', 'pull', 'data/reference_data.csv.dvc'])
-
-        # Lancer train.py
-        result = subprocess.run([
-            'python', 'src/train.py',
-            '--env', 'prod'
-        ], capture_output=True, text=True)
-
-        if result.returncode != 0:
-            raise Exception(f"Training failed: {result.stderr}")
-
-        print("✅ Réentraînement terminé")
-
-    retrain = PythonOperator(
-        task_id='retrain_models',
-        python_callable=retrain_models
-    )
-
-    # 5️⃣ Pas de réentraînement (si OK)
-    skip = EmptyOperator(task_id='skip_training')
-
-    # 6️⃣ Refresh API (après retrain)
-    def refresh_api(**context):
-        import requests
-        response = requests.get(
-            "https://regmodel-api-467498471756.europe-west1.run.app/refresh_model"
-        )
-        if response.status_code != 200:
-            raise Exception(f"API refresh failed: {response.text}")
-
-    refresh = PythonOperator(
-        task_id='refresh_api',
-        python_callable=refresh_api
-    )
-
-    # 7️⃣ Fin du pipeline
-    end = EmptyOperator(
-        task_id='pipeline_complete',
-        trigger_rule='none_failed_min_one_success'
-    )
-
-    # === FLUX ===
-    fetch_data >> predict >> evaluate
-    evaluate >> retrain >> refresh >> end
-    evaluate >> skip >> end
+# ⏳ monitoring_audit.logs (PENDING - DAG 3)
+{
+    "timestamp": TIMESTAMP,
+    "drift_detected": BOOLEAN,
+    "rmse": FLOAT,
+    "r2": FLOAT,
+    "fine_tune_triggered": BOOLEAN,
+    "fine_tune_success": BOOLEAN,
+    "model_improvement": FLOAT,            # Δ R²
+    "env": STRING,
+    "error_message": STRING
+}
 ```
 
-**Visualisation du DAG** :
-```
-[Fetch Current Data] → [Predict] → [Evaluate Metrics]
-                                          ├─→ [Retrain] → [Refresh API] → [End]
-                                          └─→ [Skip] ──────────────────────→ [End]
-```
+**Key Architecture Decisions:**
 
-**Docker Compose Airflow** :
-```yaml
-# docker-compose.yaml (ajout)
-services:
-  postgres-airflow:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
-      POSTGRES_DB: airflow
-    volumes:
-      - postgres_airflow_data:/var/lib/postgresql/data
-
-  airflow-webserver:
-    image: apache/airflow:2.8.0-python3.12
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./src:/opt/airflow/src
-      - ./app:/opt/airflow/app
-      - ./scripts:/opt/airflow/scripts
-      - ./gcp.json:/opt/airflow/gcp.json
-    ports:
-      - "8081:8080"
-    command: webserver
-    depends_on:
-      - postgres-airflow
-
-  airflow-scheduler:
-    image: apache/airflow:2.8.0-python3.12
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
-    volumes:
-      - ./dags:/opt/airflow/dags
-      - ./src:/opt/airflow/src
-      - ./app:/opt/airflow/app
-      - ./scripts:/opt/airflow/scripts
-    command: scheduler
-    depends_on:
-      - postgres-airflow
-
-volumes:
-  postgres_airflow_data:
-```
+- **Single partitioned table** instead of daily tables (better for queries, easier maintenance)
+- **Deduplication logic** prevents duplicate insertions on DAG reruns
+- **Clustering by counter ID** optimizes queries filtering by specific counters
+- **Idempotent design** allows safe reruns without data duplication
 
 ---
 
-### **Phase 4 : Monitoring Production** (`feat/mlops-monitoring`)
+#### **3.2 DAGs Airflow (Architecture modulaire)**
 
-#### **4.1 Métriques API (Prometheus + Grafana)**
+**3 DAGs séparés pour isoler les responsabilités** :
 
-**Architecture** :
-- **Prometheus** : collecte métriques (TSDB local, pas Postgres)
-- **Grafana** : dashboards
-
-**Docker Compose** :
-```yaml
-# docker-compose.yaml (ajout)
-services:
-  prometheus:
-    image: prom/prometheus:latest
-    volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
-      - prometheus_data:/prometheus
-    ports:
-      - "9090:9090"
-    command:
-      - '--config.file=/etc/prometheus/prometheus.yml'
-      - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.time=15d'
-
-  grafana:
-    image: grafana/grafana:latest
-    ports:
-      - "3000:3000"
-    environment:
-      - GF_SECURITY_ADMIN_PASSWORD=admin
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning
-    depends_on:
-      - prometheus
-
-volumes:
-  prometheus_data:
-  grafana_data:
+```mermaid
+graph LR
+    A[dag_daily_fetch_data] -->|daily| B[BigQuery Raw]
+    C[dag_daily_prediction] -->|daily| D[BigQuery Predictions]
+    E[dag_monitor_and_train] -->|weekly| F{Drift?}
+    F -->|Yes| G[Evaluate Model]
+    G -->|Poor| H[Fine-tune Model]
+    G -->|Good| I[End]
+    H --> J[Update Audit Logs]
 ```
 
-**Configuration Prometheus** :
-```yaml
-# monitoring/prometheus.yml
-global:
-  scrape_interval: 15s
+**Status**: DAG 1 ✅ Complete | DAG 2 ⏳ Next | DAG 3 ⏳ Pending
 
-scrape_configs:
-  - job_name: 'regmodel-api'
-    static_configs:
-      - targets: ['regmodel-backend:8000']
-    metrics_path: '/metrics'
+**📁 Structure des fichiers** :
+
+```text
+dags/
+├── dag_daily_fetch_data.py          # ✅ Ingestion données brutes → BigQuery (DONE)
+├── dag_daily_prediction.py          # ⏳ Prédictions via /predict → BigQuery (NEXT)
+├── dag_monitor_and_train.py         # ⏳ Drift + Eval + Fine-tuning (PENDING)
+└── utils/
+    ├── bike_helpers.py               # ✅ Fonctions BigQuery, GCS
+    └── env_config.py                 # ✅ Config ENV/PROD avec Secret Manager
 ```
 
-**Instrumentation API** :
-```python
-# backend/regmodel/app/fastapi_app.py
-from prometheus_client import Counter, Histogram, Gauge, make_asgi_app
-from starlette.middleware.base import BaseHTTPMiddleware
-import time
+**DAG Implementation Status:**
 
-# Métriques custom
-predictions_total = Counter('predictions_total', 'Total predictions', ['model_type'])
-prediction_latency = Histogram('prediction_latency_seconds', 'Prediction latency', ['model_type'])
-active_models = Gauge('active_models_count', 'Cached models count')
-
-class PrometheusMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        start = time.time()
-        response = await call_next(request)
-        duration = time.time() - start
-
-        if request.url.path == "/predict":
-            model_type = getattr(request.state, 'model_type', 'unknown')
-            predictions_total.labels(model_type=model_type).inc()
-            prediction_latency.labels(model_type=model_type).observe(duration)
-
-        return response
-
-app.add_middleware(PrometheusMiddleware)
-
-# Endpoint métriques
-metrics_app = make_asgi_app()
-app.mount("/metrics", metrics_app)
-
-@app.get("/health")
-def health():
-    active_models.set(len(model_cache))
-    return {"status": "healthy", "cached_models": len(model_cache)}
-```
-
-**Dashboard Grafana** :
-- Requêtes/sec : `rate(predictions_total[5m])`
-- Latence p50/p95/p99 : `histogram_quantile(0.95, prediction_latency_seconds)`
-- Taux erreur : `rate(http_requests_total{status=~"5.."}[5m])`
+| DAG | Status | Documentation | Tested | Notes |
+|-----|--------|---------------|--------|-------|
+| `dag_daily_fetch_data.py` | ✅ Complete | ✅ [docs/dags.md](docs/dags.md#1-daily-fetch-bike-data-dag) | ✅ Yes | Idempotent, deduplication, partitioned table |
+| `dag_daily_prediction.py` | ✅ Complete | ✅ [docs/dags.md](docs/dags.md#2-daily-prediction-dag) | ✅ Yes | ML predictions, drift handling, R²=0.79 |
+| `dag_monitor_and_train.py` | ✅ Complete | ✅ [docs/dags.md](docs/dags.md#3-monitor--fine-tune-dag) | ✅ Yes | Hybrid drift strategy, R²=0.72 production |
 
 ---
 
-#### **4.2 Détection de dérive (Evidently)**
+#### **3.3 DAG 1 : Ingestion des données** (`dag_daily_fetch_data.py`) ✅ **COMPLETE**
 
-**Implémentation via script Python** :
+**Status**: ✅ Implemented, Tested, Documented
 
-```python
-# monitoring/drift_detector.py
-from evidently.report import Report
-from evidently.metric_preset import DataDriftPreset, RegressionPreset
-from evidently.metrics import ColumnDriftMetric
-import pandas as pd
-from google.cloud import storage
-from datetime import datetime
+**Objectif** : Récupérer les données de trafic cycliste depuis l'API Paris Open Data et stocker dans BigQuery
 
-def detect_drift(reference_csv: str, current_csv: str, output_html: str):
-    """
-    Compare reference (train) vs current (prod) data
-    """
-    ref_df = pd.read_csv(reference_csv)
-    curr_df = pd.read_csv(current_csv)
+**Key Features Implemented:**
 
-    # Colonnes à surveiller
-    feature_cols = ['heure', 'jour_semaine', 'latitude', 'longitude', 'mois']
+- ✅ API pagination (100 records/page, up to 1000 total)
+- ✅ Deduplication logic (queries max existing date, filters duplicates)
+- ✅ Single partitioned table (`comptage_velo`) instead of daily tables
+- ✅ Data transformations (coordinates → lat/lon, date → TIMESTAMP)
+- ✅ Idempotent design (safe to rerun multiple times)
+- ✅ Validation task with graceful "no new data" handling
 
-    report = Report(metrics=[
-        DataDriftPreset(columns=feature_cols),
-        RegressionPreset(),
-        ColumnDriftMetric(column_name='heure'),
-        ColumnDriftMetric(column_name='latitude'),
-    ])
+**Architecture:**
 
-    report.run(reference_data=ref_df, current_data=curr_df)
-    report.save_html(output_html)
-
-    # Upload GCS
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    gcs_path = f"monitoring/drift_report_{timestamp}.html"
-
-    client = storage.Client()
-    bucket = client.bucket("df_traffic_cyclist1")
-    blob = bucket.blob(gcs_path)
-    blob.upload_from_filename(output_html)
-
-    print(f"✅ Rapport drift : gs://df_traffic_cyclist1/{gcs_path}")
-
-    # Retourner si drift détecté
-    drift_info = report.as_dict()['metrics'][0]['result']
-    return drift_info.get('drift_detected', False)
-
-if __name__ == "__main__":
-    import sys
-    detect_drift(sys.argv[1], sys.argv[2], sys.argv[3])
+```text
+Paris Open Data API
+    ↓ (pagination: 10 pages × 100 records)
+fetch_to_bigquery
+    ↓ (deduplication: filter existing data)
+BigQuery: bike_traffic_raw.comptage_velo
+    ↓ (validation: check recent ingestion)
+validate_ingestion
+    ✅ Success
 ```
 
-**Intégration DAG Airflow** :
-```python
-# dags/ml_pipeline_dag.py (ajout)
+**Test Results:**
 
-def check_data_drift(**context):
-    from monitoring.drift_detector import detect_drift
-    import subprocess
+```text
+Run 1 (First time):
+✅ Successfully appended 1000 records to bike_traffic_raw.comptage_velo
 
-    # Pull reference data
-    subprocess.run(['dvc', 'pull', 'data/reference_data.csv.dvc'])
-
-    reference = 'data/reference_data.csv'
-    current = context['ti'].xcom_pull(key='current_path')
-    output = '/tmp/drift_report.html'
-
-    drift_detected = detect_drift(reference, current, output)
-
-    if drift_detected:
-        print("⚠️ DATA DRIFT DÉTECTÉ")
-        # TODO: send_slack_alert()
-
-    context['ti'].xcom_push(key='drift_detected', value=drift_detected)
-
-drift_task = PythonOperator(
-    task_id='check_drift',
-    python_callable=check_data_drift
-)
-
-# Ajout au flux
-fetch_data >> drift_task >> predict >> evaluate
+Run 2 (Same data):
+📊 Latest data in BigQuery: 2025-10-26 22:00:00+00:00
+🔍 Filtered out 1000 existing records (keeping 0 new records)
+ℹ️ No new data to ingest (all data already exists in BigQuery)
+✅ Validation passed: No new data to ingest (all data already exists)
 ```
+
+**Documentation**: See [docs/dags.md](docs/dags.md) for complete implementation details
+
+**Files Modified:**
+
+- ✅ [dags/dag_daily_fetch_data.py](dags/dag_daily_fetch_data.py) - Complete implementation
+- ✅ [dags/utils/bike_helpers.py](dags/utils/bike_helpers.py) - BigQuery helpers
+- ✅ [dags/utils/env_config.py](dags/utils/env_config.py) - Environment config
+- ✅ [docs/dags.md](docs/dags.md) - Full documentation with examples
 
 ---
 
-#### **4.3 Sécurité API**
+#### **3.4 DAG 2 : Prédictions quotidiennes** (`dag_daily_prediction.py`) ✅ **COMPLETE**
+
+**Status**: ✅ Implemented, Tested, Documented
+
+**Objectif** : Lire BigQuery → Prédire via `/predict` → Stocker résultats avec gestion du data drift
+
+**Key Features Implemented:**
+
+- ✅ Reads last 24h of data from partitioned table (`comptage_velo`)
+- ✅ 7-day lookback for data availability check
+- ✅ Data transformation for API compatibility (coordinates reconstruction)
+- ✅ ML API `/predict` endpoint integration (Random Forest model)
+- ✅ Data drift handling (unknown compteurs fallback)
+- ✅ Prediction quality metrics (RMSE, MAE, R²)
+- ✅ Storage in daily prediction tables (`daily_YYYYMMDD`)
+- ✅ End-to-end validation
+
+**Test Results (2025-10-29):**
+
+- Task 1: 2000 rows available (last 7 days)
+- Task 2: 291 predictions generated (last 24h)
+- Task 3: All validations passed
+- Metrics: RMSE=32.70, MAE=24.17, R²=0.7856 (excellent!)
+- Avg prediction: 61.05 bikes/hour, Range: 37.97-401.07
+
+**Data Drift Handling:**
+
+Backend handles new bike counters not seen during training:
+
+- Maps unknown compteurs to known fallback category
+- Logs warnings for monitoring
+- Pipeline continues without crashes
+- TODO: Prometheus metrics + BigQuery audit logging
+
+**Architecture Decisions:**
+
+- Daily prediction tables (easier day-to-day comparison)
+- Random Forest (RF) model for predictions
+- Batch size: up to 500 records per run
+
+**Documentation**: [docs/dags.md#2-daily-prediction-dag](docs/dags.md#2-daily-prediction-dag)
+
+**Files Modified:**
+
+- ✅ [dags/dag_daily_prediction.py](dags/dag_daily_prediction.py)
+- ✅ [backend/regmodel/app/classes.py](backend/regmodel/app/classes.py)
+- ✅ [docs/dags.md](docs/dags.md#2-daily-prediction-dag)
+
+---
+
+#### **3.5 DAG 3 : Monitoring + Fine-tuning** (`dag_monitor_and_train.py`) ✅ **COMPLETE**
+
+**Status**: ✅ Implemented, Tested, Documented
+
+**Objectif** : Drift detection → Validation → Fine-tuning conditionnel avec stratégie hybride intelligente
+
+**Key Features Implemented:**
+
+- ✅ **Drift Detection** with Evidently AI (schema drift + distribution drift)
+- ✅ **Production Metrics Validation** (R², RMSE on recent BigQuery data)
+- ✅ **Hybrid Drift Management Strategy** combining proactive and reactive triggers
+- ✅ **Schema Drift Resolution** via column normalization script
+- ✅ **Column Filtering Optimization** (4 features analyzed including `identifiant_du_compteur`)
+- ✅ **Double Evaluation Strategy** (test_baseline + test_current)
+- ✅ **Sliding Window Training** (baseline + recent data when schemas align)
+- ✅ **Intelligent Decision Logic** prioritizing cost-efficiency and performance
+- ✅ **Complete Audit Trail** in `monitoring_audit.logs` BigQuery table
+
+**Architecture Flow:**
+
+```text
+Reference CSV + BigQuery Current (7 days)
+    ↓
+monitor_drift (Evidently)
+    ↓ (drift_share, drift_detected)
+validate_model (RMSE, R²)
+    ↓ (production metrics)
+decide_fine_tune (BranchPythonOperator)
+    ├─→ PRIORITY 1: R² < 0.65 OR RMSE > 60 → fine_tune_model (REACTIVE)
+    ├─→ PRIORITY 2: drift ≥ 50% AND R² < 0.70 → fine_tune_model (PROACTIVE)
+    ├─→ PRIORITY 3: drift ≥ 30% BUT R² ≥ 0.70 → end_monitoring (WAIT)
+    └─→ PRIORITY 4: drift < 30% AND good metrics → end_monitoring (ALL GOOD)
+    ↓
+fine_tune_model (FastAPI /train with double evaluation)
+    ↓
+end_monitoring (audit logging to BigQuery)
+```
+
+**Hybrid Drift Management Strategy:**
+
+The system uses a sophisticated decision matrix that balances cost efficiency with performance:
+
+| R² Score | Drift Share | Decision | Rationale |
+|----------|-------------|----------|-----------|
+| < 0.65 | Any | **RETRAIN (Reactive)** | Critical performance issue |
+| 0.65-0.70 | ≥ 50% | **RETRAIN (Proactive)** | High drift + declining metrics |
+| 0.65-0.70 | 30-50% | **WAIT** | Moderate drift, metrics acceptable |
+| ≥ 0.70 | ≥ 30% | **WAIT** | Model handles drift well |
+| ≥ 0.70 | < 30% | **ALL GOOD** | Continue monitoring |
+
+**Key Technical Solutions:**
+
+1. **Schema Drift Resolution**: Created `scripts/normalize_reference_columns.py` to normalize French column names to match BigQuery schema
+2. **Column Filtering Fix**: Modified `backend/regmodel/app/fastapi_app.py` with whitelist approach (`always_keep` list)
+3. **Production Metrics Priority**: Decision logic uses production R² (not test_baseline) for retraining decisions
+4. **handle_unknown='ignore' Strategy**: OneHotEncoder maps unknown compteurs to zero vectors, allowing model to work on geographic/temporal features
+
+**Test Results (2025-11-03):**
+
+```text
+Drift Detection:
+- Drift share: 50% (critical level)
+- Features analyzed: 4 (identifiant_du_compteur, nom_du_compteur, comptage_horaire, coordinates)
+
+Production Metrics:
+- R² on current data: 0.7214 (excellent)
+- RMSE: 32.25 (well below threshold of 60)
+- Validation samples: 291
+
+Decision:
+✅ WAIT - Significant drift but metrics OK (no unnecessary retraining)
+💰 Cost savings: Model performs well despite 50% drift
+📊 Will retrain proactively if R² drops below 0.70
+🚨 Will retrain reactively if R² drops below 0.65
+```
+
+**Documentation:**
+
+- ✅ [docs/dags.md#3-monitor--fine-tune-dag](docs/dags.md#3-monitor--fine-tune-dag) - Complete DAG documentation
+- ✅ [docs/drift_strategy.md](docs/drift_strategy.md) - 250+ lines covering hybrid strategy, decision matrix, real-world examples
+- ✅ [docs/training_strategy.md](docs/training_strategy.md) - Double evaluation strategy
+
+**Files Created/Modified:**
+
+- ✅ [dags/dag_monitor_and_train.py](dags/dag_monitor_and_train.py) - Complete implementation with hybrid strategy
+- ✅ [scripts/normalize_reference_columns.py](scripts/normalize_reference_columns.py) - Schema drift resolution
+- ✅ [backend/regmodel/app/fastapi_app.py](backend/regmodel/app/fastapi_app.py) - Column filtering optimization
+- ✅ [docs/drift_strategy.md](docs/drift_strategy.md) - Comprehensive strategy documentation
+- ✅ [docs/dags.md](docs/dags.md) - Updated with DAG 3 details
+
+**Benefits of Hybrid Strategy:**
+
+- ✅ Avoids unnecessary retraining (cost efficiency)
+- ✅ Catches degradation early (proactive trigger)
+- ✅ Responds to critical issues immediately (reactive trigger)
+- ✅ Leverages `handle_unknown='ignore'` for new compteurs
+- ✅ Complete audit trail for decision transparency
+
+---
+
+#### **3.6 Prometheus + Grafana (Métriques API)** ⏳ **PENDING**
+
+**Status**: ⏳ To be implemented
+
+**Objectif**: Monitoring temps réel des API endpoints et modèles ML
+
+**Implementation Plan:**
+
+1. **FastAPI Instrumentation**:
+   - Add `prometheus_client` middleware
+   - Expose `/metrics` endpoint
+   - Track: predictions_total, prediction_latency, active_models, training_total
+
+2. **Docker Compose**:
+   - Add Prometheus service (port 9090)
+   - Add Grafana service (port 3000)
+   - Configure scraping of regmodel-backend `/metrics`
+
+3. **Grafana Dashboards**:
+   - API request rate (requests/sec)
+   - Prediction latency (p50, p95, p99)
+   - Error rate (5xx responses)
+   - Training success rate
+   - Model cache size
+
+**Access Points** (when implemented):
+
+- Prometheus: <http://localhost:9090>
+- Grafana: <http://localhost:3000> (admin/admin)
+
+---
+
+#### **3.7 Sécurité API**
 
 **API Key + Rate Limiting** :
 
@@ -551,15 +666,20 @@ app.add_exception_handler(429, _rate_limit_exceeded_handler)
 @app.post("/predict", dependencies=[Depends(verify_api_key)])
 @limiter.limit("100/minute")
 async def predict(data: PredictRequest, request: Request):
-    # Store model_type for Prometheus
     request.state.model_type = data.model_type
-
     model = get_cached_model(data.model_type, data.metric)
     y_pred = model.predict_clean(pd.DataFrame(data.records))
     return {"predictions": y_pred.tolist()}
+
+@app.post("/train", dependencies=[Depends(verify_api_key)])
+@limiter.limit("10/hour")
+async def train(data: TrainRequest, request: Request):
+    # Training logic with fine-tuning support
+    ...
 ```
 
 **Variables d'environnement** :
+
 ```bash
 # backend/regmodel/.env
 ENV=PROD
@@ -613,7 +733,7 @@ spec:
 
 ## 📋 Stratégie de branches
 
-```
+```text
 feat/mlops-integration (branche principale)
 ├── feat/mlops-dvc-data-versioning      # Phase 2.1
 ├── feat/mlops-tests-ci                 # Phase 2.2
@@ -623,6 +743,7 @@ feat/mlops-integration (branche principale)
 ```
 
 **Workflow Git** :
+
 1. Créer branche depuis `feat/mlops-integration`
 2. Développer feature
 3. Tester localement
@@ -633,7 +754,7 @@ feat/mlops-integration (branche principale)
 
 ## 🏗️ Structure finale du projet
 
-```
+```text
 ds_traffic_cycliste1/
 ├── .github/
 │   └── workflows/
@@ -697,6 +818,7 @@ ds_traffic_cycliste1/
 ## ✅ Checklist finale
 
 ### Technique
+
 - [ ] DVC configuré + data reference/current versionnées
 - [ ] Tests unitaires couvrent >80% du code
 - [ ] CI passe sur toutes les branches
@@ -708,6 +830,7 @@ ds_traffic_cycliste1/
 - [ ] Docker Compose lance toute la stack
 
 ### Documentation
+
 - [ ] README principal mis à jour
 - [ ] Doc DVC (split temporel, versioning)
 - [ ] Doc Airflow (DAG, branchement, scheduling)
@@ -715,10 +838,179 @@ ds_traffic_cycliste1/
 - [ ] Doc Evidently (drift detection, alertes)
 
 ### Présentation
+
 - [ ] Slides de présentation (15-20 slides)
 - [ ] Démo vidéo de secours
 - [ ] Diagramme architecture MLOps complet
 - [ ] Exemples de métriques/dashboards
+
+---
+
+## 📈 Recent Progress Summary (2025-10-28)
+
+### ✅ Phase 3.3 - DAG 1 Implementation Complete
+
+**What was accomplished:**
+
+1. **Docker Infrastructure Fixes**:
+   - Fixed multi-platform support (WSL2 amd64 + Mac arm64)
+   - Resolved Airflow permission issues (logs directory)
+   - Configured volume mounts for shared_data and models
+
+2. **BigQuery Architecture**:
+   - Created `bike_traffic_raw` dataset in BigQuery
+   - Implemented single partitioned table (`comptage_velo`) instead of daily tables
+   - Partitioning: Daily partitions on `date_et_heure_de_comptage`
+   - Clustering: By `identifiant_du_compteur` for query optimization
+
+3. **DAG 1 Implementation** ([dags/dag_daily_fetch_data.py](dags/dag_daily_fetch_data.py)):
+   - API pagination handling (100 records/page, up to 1000 total)
+   - Deduplication logic to prevent duplicate insertions
+   - Data transformations (coordinates extraction, date conversion)
+   - Validation task with graceful "no new data" handling
+   - Idempotent design (safe to rerun multiple times)
+
+4. **Documentation**:
+   - Complete DAG documentation in [docs/dags.md](docs/dags.md)
+   - Real log examples showing deduplication in action
+   - Architecture diagrams and data flow
+
+**Test Results:**
+
+- ✅ First run: 1000 records ingested successfully
+- ✅ Second run: 0 new records (all duplicates filtered)
+- ✅ Validation passes gracefully in both cases
+
+**Commits:**
+
+- `2a67887` - feat: add deduplication logic to daily fetch DAG and document architecture
+
+---
+
+### ✅ Phase 3.4 - DAG 2 Implementation Complete (2025-10-29)
+
+**What was accomplished:**
+
+1. **DAG 2 Adaptation to Partitioned Tables**:
+   - Modified to read from `comptage_velo` instead of daily tables
+   - Added 7-day lookback check for data availability
+   - Query last 24h for predictions (up to 500 records)
+
+2. **Data Transformation Pipeline**:
+   - Reconstruct `coordonnées_géographiques` from lat/lon
+   - Convert timestamps to strings for JSON serialization
+   - Add pandas import for datetime detection
+
+3. **Backend Data Drift Handling**:
+   - Unknown compteurs mapped to fallback (first known category)
+   - Patch loaded models for backward compatibility
+   - Add logging for drift detection (TODO: Prometheus + BigQuery audit)
+   - Applied to: NNPipeline, AffluenceClassifierPipeline, RFPipeline
+
+4. **End-to-End Testing**:
+   - Task 1: 2000 rows found (last 7 days)
+   - Task 2: 291 predictions generated (last 24h)
+   - Task 3: Validation passed
+   - Metrics: RMSE=32.70, MAE=24.17, R²=0.7856 (excellent!)
+
+5. **Documentation**:
+   - Complete DAG 2 documentation in [docs/dags.md#2-daily-prediction-dag](docs/dags.md#2-daily-prediction-dag)
+   - Data drift handling explained with examples
+   - Quality metrics table with interpretation
+
+**Commits:**
+
+- `5c5722a` - feat: implement DAG 2 prediction pipeline with data drift handling
+
+---
+
+### ✅ Phase 3.5 - DAG 3 Implementation Complete (2025-11-03)
+
+**What was accomplished:**
+
+1. **Hybrid Drift Management Strategy Implementation**:
+   - Priority-based decision logic (4 tiers: force → reactive → proactive → wait/ok)
+   - R² thresholds: 0.65 (critical), 0.70 (warning)
+   - RMSE threshold: 60.0
+   - Drift thresholds: 50% (critical), 30% (warning)
+   - Balances cost efficiency with performance requirements
+
+2. **Schema Drift Resolution**:
+   - Created `scripts/normalize_reference_columns.py`
+   - Normalized French column names (e.g., "Identifiant du compteur") to English ("identifiant_du_compteur")
+   - Eliminated false positive schema drift detection
+   - Backup creation for data safety
+
+3. **Column Filtering Optimization**:
+   - Modified `backend/regmodel/app/fastapi_app.py` with whitelist approach
+   - Added `always_keep` list for critical features
+   - Increased analyzed features from 3 to 4
+   - Ensures `identifiant_du_compteur` always included
+
+4. **Double Evaluation Strategy**:
+   - test_baseline.csv: Fixed reference set for regression detection (R²=0.31)
+   - Production data (BigQuery): Current performance evaluation (R²=0.72)
+   - Decision logic uses production metrics (not test_baseline)
+   - Challenger must improve on both sets to be promoted
+
+5. **Complete DAG 3 Implementation**:
+   - Task 1: `monitor_drift` - Evidently AI integration (schema + distribution drift)
+   - Task 2: `validate_model` - Production metrics on recent 7 days from BigQuery
+   - Task 3: `decide_fine_tune` - BranchPythonOperator with hybrid strategy
+   - Task 4: `fine_tune_model` - FastAPI `/train` endpoint with sliding window
+   - Task 5: `end_monitoring` - Audit logging to `monitoring_audit.logs`
+
+6. **End-to-End Testing**:
+   - Test 1 (no force): WAIT decision (drift=50%, R²=0.72) ✅
+   - Test 2 (force + test_mode): Training completed, model rejected (no improvement) ✅
+   - Test 3 (force + full baseline): ~20 min training, double evaluation ✅
+   - All scenarios validated successfully
+
+7. **Comprehensive Documentation**:
+   - [docs/drift_strategy.md](docs/drift_strategy.md) - 250+ lines with decision matrix, examples, best practices
+   - [docs/dags.md#3](docs/dags.md#3-monitor--fine-tune-dag) - Complete DAG 3 documentation
+   - [docs/training_strategy.md](docs/training_strategy.md) - Updated with double evaluation
+   - Real-world scenario analysis (current production: R²=0.72, drift=50%)
+
+**Test Results (2025-11-03):**
+
+```text
+Production Scenario:
+- Drift detected: 50% (critical level)
+- R² on production: 0.7214 (excellent)
+- RMSE: 32.25 (well below threshold)
+- Decision: WAIT ✅ (model handles drift well)
+- Cost savings: No unnecessary retraining
+- Monitoring: Will retrain proactively if R² < 0.70
+```
+
+**Key Technical Insights:**
+
+- `handle_unknown='ignore'` allows model to work despite new compteurs
+- Geographic (lat/lon) and temporal features compensate for unknown categories
+- Production metrics are the ground truth for retraining decisions
+- test_baseline.csv used for comparison (regression detection), not decision-making
+- Hybrid strategy provides optimal cost-benefit trade-off
+
+**Files Created/Modified:**
+
+- ✅ [dags/dag_monitor_and_train.py](dags/dag_monitor_and_train.py)
+- ✅ [scripts/normalize_reference_columns.py](scripts/normalize_reference_columns.py)
+- ✅ [backend/regmodel/app/fastapi_app.py](backend/regmodel/app/fastapi_app.py)
+- ✅ [docs/drift_strategy.md](docs/drift_strategy.md)
+- ✅ [docs/dags.md](docs/dags.md) (section 3)
+- ✅ [dags/utils/bike_helpers.py](dags/utils/bike_helpers.py)
+
+**Commits:**
+
+- To be created: "feat: implement DAG 3 with hybrid drift management strategy"
+
+**Phase 3 Status:**
+
+✅ All 3 DAGs operational and production-ready
+✅ Complete MLOps pipeline: Data Ingestion → Predictions → Monitoring → Conditional Retraining
+✅ Comprehensive documentation (dags.md, drift_strategy.md, training_strategy.md)
+✅ Cost-efficient and performance-aware decision logic
 
 ---
 

@@ -1,15 +1,17 @@
-# ENV 
+# ENV
 
 - FOr DEV
-In .env 
+In .env
 GOOGLE_APPLICATION_CREDENTIALS=gcp.json
 
 ---
 
 in dev
+
 ```bash
 docker compose up --build
 ```
+
 > on aura les deux containers : `cloudrun-classmodel-backend` et `cloudrun-regmodels-backend`
 
 ---
@@ -44,7 +46,7 @@ gcloud secrets create gcp-service-account \
   --data-file=gcp.json
 
 gcloud projects add-iam-policy-binding datascientest-460618 \
-  --member="serviceAccount:467498471756-compute@developer.gserviceaccount.com" \
+  --member="serviceAccount:<467498471756-compute@developer.gserviceaccount.com>" \
   --role="roles/secretmanager.secretAccessor"
 
 gcloud run services update predict-api-v3 \
@@ -52,7 +54,6 @@ gcloud run services update predict-api-v3 \
   --update-secrets="GOOGLE_APPLICATION_CREDENTIALS=gcp-service-account:latest"
 
 gcloud auth configure-docker europe-west1-docker.pkg.dev
-
 
 # Mounting ClassModel API
 
@@ -74,7 +75,8 @@ gcloud run deploy classmodel-api \
   --memory=4Gi \
   --set-env-vars=ENV=PROD \
   --update-secrets=GCP_JSON_CONTENT=gcp-service-account:latest
-```
+
+```text
 
 # Mouting RegModel
 
@@ -93,36 +95,36 @@ gcloud run deploy regmodel-api \
   --memory=4Gi \
   --set-env-vars=ENV=PROD \
   --update-secrets=GCP_JSON_CONTENT=gcp-service-account:latest
-```
+```text
 
 # Test endpoint
 
 Pour RegModel API
+
 ```bash
 curl -X POST "https://regmodel-api-467498471756.europe-west1.run.app/predict" \
   -H "Content-Type: application/json" \
   -d '{"records": [{"nom_du_compteur": "35 boulevard de Ménilmontant NO-SE","date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00","coordonnées_géographiques": "48.8672, 2.3501","mois_annee_comptage": "mai 2025"}],
   "model_type": "nn","metric": "r2"}'
-```
+```text
+
 Pour ClassModel API
+
 ```bash
 curl -X POST "https://classmodel-api-467498471756.europe-west1.run.app/predict" \
   -H "Content-Type: application/json" \
   -d '{"records": [{"nom_du_compteur": "35 boulevard de Ménilmontant NO-SE","date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00","coordonnées_géographiques": "48.8672, 2.3501","mois_annee_comptage": "mai 2025"}],
   "model_type": "rf_ class","metric": "f1_score"}'
-```
+```text
 
 # Secrets in Streamlit Cloud
 
 Copier coller les url from CloudRun + predict
 
-https://classmodel-api-467498471756.europe-west1.run.app/predict
+<https://classmodel-api-467498471756.europe-west1.run.app/predict>
 Important pour gestion
 
 -> nettoyer de temps en temps les artifacts à chaque run deploy
-https://console.cloud.google.com/artifacts
-->  le nom du repo dans Artifact Registry détermine le contexte d'exécution final. 
+<https://console.cloud.google.com/artifacts>
+->  le nom du repo dans Artifact Registry détermine le contexte d'exécution final.
   cloud-run-images, et pas gcf_artifacts (limité à 2gb)
-
-
-

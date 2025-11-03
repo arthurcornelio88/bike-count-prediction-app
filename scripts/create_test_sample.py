@@ -2,13 +2,16 @@
 Create a small test sample from reference_data.csv for fast testing.
 Uses 1000 random rows and saves to data/test_sample.csv
 """
-import pandas as pd
-import sys
 
-def create_test_sample(input_file: str = "data/reference_data.csv",
-                       output_file: str = "data/test_sample.csv",
-                       n_samples: int = 1000,
-                       random_state: int = 42):
+import pandas as pd
+
+
+def create_test_sample(
+    input_file: str = "data/reference_data.csv",
+    output_file: str = "data/test_sample.csv",
+    n_samples: int = 1000,
+    random_state: int = 42,
+):
     """
     Create a small test sample from reference data.
 
@@ -21,7 +24,7 @@ def create_test_sample(input_file: str = "data/reference_data.csv",
     print(f"📊 Reading {input_file}...")
 
     # Read with low_memory=False to avoid dtype warnings
-    
+
     df = pd.read_csv(input_file, sep=";", low_memory=False)
 
     print(f"✅ Loaded {len(df):,} rows")
@@ -35,17 +38,19 @@ def create_test_sample(input_file: str = "data/reference_data.csv",
 
     # Get file size
     import os
+
     size_mb = os.path.getsize(output_file) / (1024 * 1024)
 
-    print(f"✅ Test sample created:")
+    print("✅ Test sample created:")
     print(f"   - Rows: {len(df_sample):,}")
     print(f"   - Size: {size_mb:.2f} MB")
     print(f"   - Location: {output_file}")
-    print(f"\n📦 Next steps:")
+    print("\n📦 Next steps:")
     print(f"   1. dvc add {output_file}")
     print(f"   2. git add {output_file}.dvc .gitignore")
-    print(f"   3. git commit -m 'Add test sample for fast training'")
-    print(f"   4. dvc push")
+    print("   3. git commit -m 'Add test sample for fast training'")
+    print("   4. dvc push")
+
 
 if __name__ == "__main__":
     create_test_sample()

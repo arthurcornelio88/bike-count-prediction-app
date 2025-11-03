@@ -12,10 +12,10 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 import numpy as np
-import pandas as pd
 
 
 # === Fixtures ===
+
 
 @pytest.fixture(scope="module")
 def client():
@@ -40,6 +40,7 @@ def client():
             mock_model.side_effect = get_model_side_effect
 
             from backend.regmodel.app.fastapi_app import app
+
             yield TestClient(app)
 
 
@@ -47,16 +48,13 @@ def client():
 def api_request_payload(sample_bike_data):
     """Convert sample_bike_data to API request payload format."""
     # Take first 3 records from sample_bike_data
-    records = sample_bike_data.head(3).to_dict(orient='records')
+    records = sample_bike_data.head(3).to_dict(orient="records")
 
-    return {
-        "records": records,
-        "model_type": "rf",
-        "metric": "r2"
-    }
+    return {"records": records, "model_type": "rf", "metric": "r2"}
 
 
 # === Tests ===
+
 
 class TestPredictEndpoint:
     """Test /predict endpoint with valid requests."""
@@ -100,10 +98,7 @@ class TestRequestValidation:
 
     def test_missing_records_field(self, client):
         """Test error when 'records' field is missing."""
-        payload = {
-            "model_type": "rf",
-            "metric": "r2"
-        }
+        payload = {"model_type": "rf", "metric": "r2"}
         response = client.post("/predict", json=payload)
 
         assert response.status_code == 422  # Unprocessable Entity
@@ -115,10 +110,10 @@ class TestRequestValidation:
                 {
                     "nom_du_compteur": "Totem 73 boulevard de Sébastopol S-N",
                     "Date et heure de comptage": "2024-04-15 08:00:00+02:00",
-                    "Coordonnées géographiques": "48.8672, 2.3501"
+                    "Coordonnées géographiques": "48.8672, 2.3501",
                 }
             ],
-            "metric": "r2"
+            "metric": "r2",
         }
         response = client.post("/predict", json=payload)
 
@@ -126,11 +121,7 @@ class TestRequestValidation:
 
     def test_empty_records_list(self, client):
         """Test prediction with empty records list."""
-        payload = {
-            "records": [],
-            "model_type": "rf",
-            "metric": "r2"
-        }
+        payload = {"records": [], "model_type": "rf", "metric": "r2"}
         response = client.post("/predict", json=payload)
 
         # Should either succeed with empty predictions or return error
@@ -141,7 +132,7 @@ class TestRequestValidation:
         response = client.post(
             "/predict",
             data="invalid json",
-            headers={"Content-Type": "application/json"}
+            headers={"Content-Type": "application/json"},
         )
 
         assert response.status_code == 422

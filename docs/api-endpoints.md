@@ -72,6 +72,7 @@ curl -X POST "http://localhost:8000/predict" \
 ```
 
 **Response:**
+
 ```json
 {
   "predictions": [125.43]
@@ -100,6 +101,7 @@ curl -X POST "https://regmodel-api-467498471756.europe-west1.run.app/predict" \
 ```
 
 **Response:**
+
 ```json
 {
   "predictions": [123.78]
@@ -166,6 +168,7 @@ curl -X POST "http://localhost:8000/train" \
 ```
 
 **Response:**
+
 ```json
 {
   "status": "success",
@@ -242,6 +245,7 @@ curl -X POST "http://localhost:8000/train" \
 ```
 
 **Benefits:**
+
 - ⚡ **6-30 seconds** (NN: ~6s, RF: ~30s) vs 2-5 minutes full training
 - 🧪 Perfect for testing API integration
 - 🏷️ Tagged in MLflow with `test_mode=True`
@@ -249,6 +253,7 @@ curl -X POST "http://localhost:8000/train" \
 - 💾 Avoids loading massive files in memory
 
 **Example response:**
+
 ```json
 {
   "status": "success",
@@ -279,9 +284,10 @@ curl -X POST "https://regmodel-api-467498471756.europe-west1.run.app/train" \
 ```
 
 **What happens:**
+
 1. ✅ Loads data from `data/reference_data.csv`
 2. ✅ Trains Random Forest model
-3. ✅ Logs experiment to MLflow (http://localhost:5000)
+3. ✅ Logs experiment to MLflow (<http://localhost:5000>)
 4. ✅ Uploads model artifacts to `gs://df_traffic_cyclist1/models/rf/`
 5. ✅ Updates `gs://df_traffic_cyclist1/models/summary.json`
 
@@ -313,11 +319,11 @@ Interactive API documentation (Swagger UI).
 
 ### 🔧 Local
 
-Visit: http://localhost:8000/docs
+Visit: <http://localhost:8000/docs>
 
 ### ☁️ Production
 
-Visit: https://regmodel-api-467498471756.europe-west1.run.app/docs
+Visit: <https://regmodel-api-467498471756.europe-west1.run.app/docs>
 
 ---
 
@@ -327,11 +333,11 @@ Alternative API documentation (ReDoc).
 
 ### 🔧 Local
 
-Visit: http://localhost:8000/redoc
+Visit: <http://localhost:8000/redoc>
 
 ### ☁️ Production
 
-Visit: https://regmodel-api-467498471756.europe-west1.run.app/redoc
+Visit: <https://regmodel-api-467498471756.europe-west1.run.app/redoc>
 
 ---
 
@@ -366,6 +372,7 @@ No authentication required (open access on localhost).
 **Current:** Open access (no authentication)
 
 **Future (Phase 4):**
+
 - API Key via `X-API-Key` header
 - Rate limiting: 100 requests/minute
 
@@ -516,5 +523,5 @@ graph LR
 
 - **Logs (local):** `docker compose logs -f regmodel-backend`
 - **Logs (prod):** `gcloud run logs read regmodel-api --limit 50`
-- **MLflow UI:** http://localhost:5000 (local only)
-- **API Docs:** http://localhost:8000/docs (local) or https://regmodel-api-467498471756.europe-west1.run.app/docs (prod)
+- **MLflow UI:** <http://localhost:5000> (local only)
+- **API Docs:** <http://localhost:8000/docs> (local) or <https://regmodel-api-467498471756.europe-west1.run.app/docs> (prod)
