@@ -279,8 +279,12 @@ else:
 3. **Decide**: If RMSE > 50, trigger fine-tuning
 4. **Fine-tune**:
    - Fetch last 30 days from BigQuery (limit 2000 rows)
-   - Train on train_baseline.csv (660K samples)
-   - **Evaluate on test_baseline + test_current** (20% of fetched data)
+   - **Split current_data**: 80% training / 20% evaluation
+   - **Sliding Window Training**: Concatenate train_baseline (660K samples) + train_current (80% of fresh data)
+   - Train model on combined dataset (learns new compteurs!)
+   - **Double Evaluation**:
+     - test_baseline (181K samples, fixed reference)
+     - test_current (20% of fetched data, new distribution)
 5. **Decision**: Deploy/Reject/Skip based on double metrics
 6. **Audit**: Log all metrics to BigQuery `monitoring_audit.logs`
 
@@ -441,7 +445,13 @@ See [mlflow_cloudsql.md](./mlflow_cloudsql.md) for complete setup details.
 │                                                               │
 │  1. dag_monitor_and_train.py triggers on drift alert         │
 │  2. POST /train with last 30 days from BigQuery              │
-│  3. Train on train_baseline.csv (660K samples)               │
+│                                                               │
+│  3. 🔄 SLIDING WINDOW TRAINING:                               │
+│     a) Split current_data: 80% train / 20% test              │
+│     b) Concatenate: train_baseline + train_current           │
+│     c) Train model on COMBINED data (learns new compteurs!)  │
+│     d) Result: Model adapts to new patterns + locations      │
+│                                                               │
 │  4. ✅ Evaluate on test_baseline.csv (R² >= 0.60?)           │
 │  5. ✅ Evaluate on test_current (improvement?)               │
 │                                                               │
@@ -584,6 +594,48 @@ print(f"Decision: {result.get('deployment_decision', 'N/A')}")
 | **Weekly Fine-Tuning** | Airflow + API, 30 days data | Fast adaptation to drift |
 | **MLflow Integration** | Cloud SQL + GCS | Centralized tracking, team collaboration |
 | **Audit Logging** | BigQuery + GCS | Full decision history, compliance |
+
+---
+
+## Testing & Debugging
+
+### Test Mode
+
+Use `test_mode=true` to skip loading large baseline dataset (300MB) during development:
+
+```bash
+# Quick test (~10 seconds)
+docker exec airflow-webserver airflow dags trigger monitor_and_fine_tune \
+  --conf '{"force_fine_tune": true, "test_mode": true}'
+
+# Full test with baseline evaluation (~2-3 minutes)
+docker exec airflow-webserver airflow dags trigger monitor_and_fine_tune \
+  --conf '{"force_fine_tune": true, "test_mode": false}'
+```
+
+**Behavior**:
+
+- `test_mode=true`: Skips `test_baseline.csv` evaluation (metrics = 0.0)
+- `test_mode=false`: Full evaluation on 132K baseline samples
+
+### Monitoring Audit Logs
+
+Query BigQuery for deployment decisions:
+
+```sql
+SELECT
+  timestamp,
+  deployment_decision,
+  r2_baseline,
+  r2_current,
+  r2_train,
+  baseline_regression,
+  model_improvement,
+  model_uri
+FROM `datascientest-460618.monitoring_audit.logs`
+ORDER BY timestamp DESC
+LIMIT 10;
+```
 
 ---
 

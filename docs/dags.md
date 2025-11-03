@@ -379,3 +379,129 @@ Based on recent test run (2025-10-29):
 
 **Performance**: R² of 0.7856 indicates the model explains most of the variance in bike traffic,
 which is very good for time-series prediction with external factors.
+
+---
+
+## 3. Monitor & Fine-Tune DAG
+
+- **DAG ID**: `monitor_and_fine_tune`
+- **Schedule**: Weekly on Monday at 08:00 UTC (configurable)
+- **Purpose**: Detect data/schema drift, validate current champion model, and trigger fine-tuning when needed.
+
+### Architecture Overview
+
+This DAG stitches together monitoring, evaluation, and retraining:
+
+- Loads reference vs current datasets to run schema & distribution drift checks
+- Scores champion model performance on the latest BigQuery ground-truth window
+- Applies decision logic (drift or degraded metrics) to decide on retraining
+- Fine-tunes the regression model via the FastAPI `/train` endpoint with double evaluation
+- Logs every run into BigQuery `monitoring_audit.logs` for traceability
+
+### Tasks
+
+#### 3.1 `monitor_drift`
+
+Compares reference data (`data/reference_data.csv`) and current batch (last 7 days from BigQuery) via the `/monitor` API.
+
+**Highlights**:
+
+- Uses Evidently 0.5.0 to generate drift summary
+- Treats missing common columns as schema drift (`drift_share = 1.0`)
+- Outputs detailed summary to XCom (`drift_summary` & `drift_detected`)
+
+![monitor_drift screenshot placeholder](/docs/img/dag3_monitor_drift.png)
+
+#### 3.2 `validate_model`
+
+Pulls 7 days of predictions vs actuals and computes RMSE/R² using BigQuery windowed join.
+
+**Highlights**:
+
+- Ensures current champion is still performant (default thresholds: R² ≥ 0.65, RMSE ≤ 60)
+- Pushes metrics to XCom for decision step (`r2`, `rmse`, `validation_samples`)
+
+![validate_model screenshot placeholder](/docs/img/dag3_validate_model.png)
+
+#### 3.3 `decide_fine_tune`
+
+BranchPythonOperator applying **Hybrid Drift Management Strategy** (combining proactive and reactive approaches):
+
+**Decision Logic (Priority Order):**
+
+1. **Force flag** (`dag_run.conf.force_fine_tune`): Overrides all logic for testing
+2. **REACTIVE trigger** (R² < 0.65 OR RMSE > 60): Immediate retraining when metrics are critically poor
+3. **PROACTIVE trigger** (drift ≥ 50% AND R² < 0.70): Preventive retraining when high drift + metrics declining
+4. **WAIT** (drift ≥ 30% BUT R² ≥ 0.70): Monitor closely, no retraining yet (model handles drift via `handle_unknown='ignore'`)
+5. **ALL GOOD** (drift < 30% AND good metrics): Continue monitoring, no action
+
+**Thresholds:**
+
+- R² critical: 0.65 (below = immediate retrain)
+- R² warning: 0.70 (below + high drift = proactive retrain)
+- RMSE threshold: 60.0
+- Drift critical: 50% (high drift)
+- Drift warning: 30% (moderate drift)
+
+**Strategy Benefits:**
+
+- ✅ Avoids unnecessary retraining when model handles drift well (cost efficiency)
+- ✅ Catches degradation early with proactive trigger (performance)
+- ✅ Responds immediately to critical performance issues (reliability)
+
+![decide_fine_tune screenshot placeholder](/docs/img/dag3_decide_fine_tune.png)
+
+#### 3.4 `fine_tune_model`
+
+Invokes the FastAPI `/train` endpoint with `data_source="baseline"` and optional `current_data` payload (sliding window).
+
+**Highlights**:
+
+- Fetches 30 days from BigQuery and submits 2k samples (configurable)
+- Sliding-window strategy: combines baseline training data with fresh samples when schemas align
+- Double evaluation: champion vs new model on `test_baseline` + holdout current data
+- Writes result metrics, run ids, and deployment decision back to XCom for auditing
+
+![fine_tune_model screenshot placeholder](/docs/img/dag3_finetuning.png)
+
+#### 3.5 `end_monitoring`
+
+Final task that consolidates all run metadata and writes an audit record to BigQuery (`monitoring_audit.logs`).
+
+**Audit Fields**:
+
+- Drift detected, RMSE, R², fine-tune triggered & success flags
+- Model improvement delta, model URI, run id, decision rationale
+- `baseline_regression` & `double_evaluation_enabled` indicators
+
+![end_monitoring screenshot placeholder](/docs/img/dag3_end_monitoring.png)
+
+### Monitoring Notes
+
+- **Schema Drift Handling**: If reference/current columns diverge (e.g., translated column names), the monitor treats it as full drift and triggers retraining.
+- **Timeouts**: Fine-tune task has a 15-minute execution timeout and HTTP timeout of 10 minutes to accommodate large training sets.
+- **Test Mode**: DAG accepts `dag_run.conf.test_mode` to force the backend `/train` endpoint into lightweight datasets for DEV.
+
+### Data Flow Summary
+
+```text
+Reference CSV (data/reference_data.csv)      BigQuery current window (7 days)
+                 │                                      │
+                 └── monitor_drift ──── drift summary ──┘
+                                   │
+                      validate_model (RMSE / R²)
+                                   │
+                      decide_fine_tune (branch)
+                       │                       │
+         fine_tune_model (FastAPI /train)   end_monitoring
+                       │                       │
+            MLflow + GCS artifacts      BigQuery monitoring_audit.logs
+```
+
+### Runbook Checklist
+
+- [ ] Monitor drift report shows `drift_share` and column overlap status
+- [ ] Validation task logs RMSE/R² and sample count
+- [ ] Decision task prints branch rationale (drift, metrics, force flag)
+- [ ] Fine-tuning logs include sliding-window status + double evaluation metrics
+- [ ] Audit record written with `fine_tune_triggered` and `model_improvement`

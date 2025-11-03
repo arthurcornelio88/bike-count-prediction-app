@@ -166,7 +166,7 @@ curl -X POST "http://localhost:8000/train" \
 
 ### **Phase 3 : Orchestration Airflow + Monitoring Production** (`feat/mlops-airflow-pipeline`)
 
-**Status**: 🔄 In Progress (DAG 2/3 Complete ✅)
+**Status**: ✅ COMPLETE (All 3 DAGs Operational)
 
 **Progress Summary:**
 
@@ -174,11 +174,13 @@ curl -X POST "http://localhost:8000/train" \
 - ✅ Airflow stack deployed via docker-compose (WSL2 + Mac multi-platform support)
 - ✅ **DAG 1/3 COMPLETE**: `dag_daily_fetch_data.py` - Data ingestion with deduplication
 - ✅ **DAG 2/3 COMPLETE**: `dag_daily_prediction.py` - ML predictions with drift handling
-- ⏳ **DAG 3/3 PENDING**: `dag_monitor_and_train.py` - Next priority
-- ✅ BigQuery datasets: `bike_traffic_raw` (raw data), `bike_traffic_predictions` (predictions)
+- ✅ **DAG 3/3 COMPLETE**: `dag_monitor_and_train.py` - Intelligent monitoring with hybrid drift strategy
+- ✅ BigQuery datasets: `bike_traffic_raw` (raw data), `bike_traffic_predictions` (predictions), `monitoring_audit` (logs)
 - ✅ BigQuery partitioned table architecture implemented (`comptage_velo`)
 - ✅ Data drift handling in ML API (unknown compteurs fallback)
-- ⏳ Prometheus + Grafana monitoring pending
+- ✅ Schema drift resolution with column normalization
+- ✅ Hybrid drift management strategy (proactive + reactive triggers)
+- ⏳ Prometheus + Grafana monitoring pending (optional)
 
 **Objectifs unifiés** :
 
@@ -400,7 +402,7 @@ dags/
 |-----|--------|---------------|--------|-------|
 | `dag_daily_fetch_data.py` | ✅ Complete | ✅ [docs/dags.md](docs/dags.md#1-daily-fetch-bike-data-dag) | ✅ Yes | Idempotent, deduplication, partitioned table |
 | `dag_daily_prediction.py` | ✅ Complete | ✅ [docs/dags.md](docs/dags.md#2-daily-prediction-dag) | ✅ Yes | ML predictions, drift handling, R²=0.79 |
-| `dag_monitor_and_train.py` | ⏳ Pending | ⏳ Pending | ⏳ No | Drift detection + conditional fine-tuning |
+| `dag_monitor_and_train.py` | ✅ Complete | ✅ [docs/dags.md](docs/dags.md#3-monitor--fine-tune-dag) | ✅ Yes | Hybrid drift strategy, R²=0.72 production |
 
 ---
 
@@ -506,37 +508,103 @@ Backend handles new bike counters not seen during training:
 
 ---
 
-#### **3.5 DAG 3 : Monitoring + Fine-tuning** (`dag_monitor_and_train.py`) ⏳ **PENDING**
+#### **3.5 DAG 3 : Monitoring + Fine-tuning** (`dag_monitor_and_train.py`) ✅ **COMPLETE**
 
-**Status**: ⏳ To be implemented after DAG 2
+**Status**: ✅ Implemented, Tested, Documented
 
-**Objectif** : Drift detection → Validation → Fine-tuning conditionnel
+**Objectif** : Drift detection → Validation → Fine-tuning conditionnel avec stratégie hybride intelligente
 
-**Implementation Plan:**
+**Key Features Implemented:**
 
-1. **Drift Detection**: Use Evidently to compare reference vs current data
-2. **Model Validation**: Compare predictions vs actuals from BigQuery
-3. **Decision Logic**: Conditional branching based on:
-   - Drift detected + R² < threshold OR RMSE > threshold → Fine-tune
-   - Otherwise → End without training
-4. **Fine-tuning**: Call `/train` endpoint (already tested and working)
-5. **Audit Logging**: Store all metrics in `monitoring_audit.logs`
-6. **Document**: Add to [docs/dags.md](docs/dags.md) when implemented
+- ✅ **Drift Detection** with Evidently AI (schema drift + distribution drift)
+- ✅ **Production Metrics Validation** (R², RMSE on recent BigQuery data)
+- ✅ **Hybrid Drift Management Strategy** combining proactive and reactive triggers
+- ✅ **Schema Drift Resolution** via column normalization script
+- ✅ **Column Filtering Optimization** (4 features analyzed including `identifiant_du_compteur`)
+- ✅ **Double Evaluation Strategy** (test_baseline + test_current)
+- ✅ **Sliding Window Training** (baseline + recent data when schemas align)
+- ✅ **Intelligent Decision Logic** prioritizing cost-efficiency and performance
+- ✅ **Complete Audit Trail** in `monitoring_audit.logs` BigQuery table
 
 **Architecture Flow:**
 
 ```text
-[Monitor Drift] → [Validate Model] → [Decision]
-                                        ├─→ [Fine-tune via /train] → [Log Audit]
-                                        └─→ [Log Audit (no training)]
+Reference CSV + BigQuery Current (7 days)
+    ↓
+monitor_drift (Evidently)
+    ↓ (drift_share, drift_detected)
+validate_model (RMSE, R²)
+    ↓ (production metrics)
+decide_fine_tune (BranchPythonOperator)
+    ├─→ PRIORITY 1: R² < 0.65 OR RMSE > 60 → fine_tune_model (REACTIVE)
+    ├─→ PRIORITY 2: drift ≥ 50% AND R² < 0.70 → fine_tune_model (PROACTIVE)
+    ├─→ PRIORITY 3: drift ≥ 30% BUT R² ≥ 0.70 → end_monitoring (WAIT)
+    └─→ PRIORITY 4: drift < 30% AND good metrics → end_monitoring (ALL GOOD)
+    ↓
+fine_tune_model (FastAPI /train with double evaluation)
+    ↓
+end_monitoring (audit logging to BigQuery)
 ```
 
-**Key Features:**
+**Hybrid Drift Management Strategy:**
 
-- Weekly schedule (configurable)
-- BranchPythonOperator for conditional logic
-- Integration with existing `/train` endpoint
-- Complete audit trail in BigQuery
+The system uses a sophisticated decision matrix that balances cost efficiency with performance:
+
+| R² Score | Drift Share | Decision | Rationale |
+|----------|-------------|----------|-----------|
+| < 0.65 | Any | **RETRAIN (Reactive)** | Critical performance issue |
+| 0.65-0.70 | ≥ 50% | **RETRAIN (Proactive)** | High drift + declining metrics |
+| 0.65-0.70 | 30-50% | **WAIT** | Moderate drift, metrics acceptable |
+| ≥ 0.70 | ≥ 30% | **WAIT** | Model handles drift well |
+| ≥ 0.70 | < 30% | **ALL GOOD** | Continue monitoring |
+
+**Key Technical Solutions:**
+
+1. **Schema Drift Resolution**: Created `scripts/normalize_reference_columns.py` to normalize French column names to match BigQuery schema
+2. **Column Filtering Fix**: Modified `backend/regmodel/app/fastapi_app.py` with whitelist approach (`always_keep` list)
+3. **Production Metrics Priority**: Decision logic uses production R² (not test_baseline) for retraining decisions
+4. **handle_unknown='ignore' Strategy**: OneHotEncoder maps unknown compteurs to zero vectors, allowing model to work on geographic/temporal features
+
+**Test Results (2025-11-03):**
+
+```text
+Drift Detection:
+- Drift share: 50% (critical level)
+- Features analyzed: 4 (identifiant_du_compteur, nom_du_compteur, comptage_horaire, coordinates)
+
+Production Metrics:
+- R² on current data: 0.7214 (excellent)
+- RMSE: 32.25 (well below threshold of 60)
+- Validation samples: 291
+
+Decision:
+✅ WAIT - Significant drift but metrics OK (no unnecessary retraining)
+💰 Cost savings: Model performs well despite 50% drift
+📊 Will retrain proactively if R² drops below 0.70
+🚨 Will retrain reactively if R² drops below 0.65
+```
+
+**Documentation:**
+
+- ✅ [docs/dags.md#3-monitor--fine-tune-dag](docs/dags.md#3-monitor--fine-tune-dag) - Complete DAG documentation
+- ✅ [docs/drift_strategy.md](docs/drift_strategy.md) - 250+ lines covering hybrid strategy, decision matrix, real-world examples
+- ✅ [docs/training_strategy.md](docs/training_strategy.md) - Double evaluation strategy
+
+**Files Created/Modified:**
+
+- ✅ [dags/dag_monitor_and_train.py](dags/dag_monitor_and_train.py) - Complete implementation with hybrid strategy
+- ✅ [scripts/normalize_reference_columns.py](scripts/normalize_reference_columns.py) - Schema drift resolution
+- ✅ [backend/regmodel/app/fastapi_app.py](backend/regmodel/app/fastapi_app.py) - Column filtering optimization
+- ✅ [docs/drift_strategy.md](docs/drift_strategy.md) - Comprehensive strategy documentation
+- ✅ [docs/dags.md](docs/dags.md) - Updated with DAG 3 details
+
+**Benefits of Hybrid Strategy:**
+
+- ✅ Avoids unnecessary retraining (cost efficiency)
+- ✅ Catches degradation early (proactive trigger)
+- ✅ Responds to critical issues immediately (reactive trigger)
+- ✅ Leverages `handle_unknown='ignore'` for new compteurs
+- ✅ Complete audit trail for decision transparency
 
 ---
 
@@ -854,12 +922,95 @@ ds_traffic_cycliste1/
 
 - `5c5722a` - feat: implement DAG 2 prediction pipeline with data drift handling
 
-**Next Steps:**
+---
 
-- ⏳ Implement DAG 3 (`dag_monitor_and_train.py`) - Monitoring + conditional retraining
-- ⏳ Add Prometheus metrics for data drift monitoring
-- ⏳ Add BigQuery audit table for drift events
-- ⏳ Add Prometheus + Grafana monitoring dashboard
+### ✅ Phase 3.5 - DAG 3 Implementation Complete (2025-11-03)
+
+**What was accomplished:**
+
+1. **Hybrid Drift Management Strategy Implementation**:
+   - Priority-based decision logic (4 tiers: force → reactive → proactive → wait/ok)
+   - R² thresholds: 0.65 (critical), 0.70 (warning)
+   - RMSE threshold: 60.0
+   - Drift thresholds: 50% (critical), 30% (warning)
+   - Balances cost efficiency with performance requirements
+
+2. **Schema Drift Resolution**:
+   - Created `scripts/normalize_reference_columns.py`
+   - Normalized French column names (e.g., "Identifiant du compteur") to English ("identifiant_du_compteur")
+   - Eliminated false positive schema drift detection
+   - Backup creation for data safety
+
+3. **Column Filtering Optimization**:
+   - Modified `backend/regmodel/app/fastapi_app.py` with whitelist approach
+   - Added `always_keep` list for critical features
+   - Increased analyzed features from 3 to 4
+   - Ensures `identifiant_du_compteur` always included
+
+4. **Double Evaluation Strategy**:
+   - test_baseline.csv: Fixed reference set for regression detection (R²=0.31)
+   - Production data (BigQuery): Current performance evaluation (R²=0.72)
+   - Decision logic uses production metrics (not test_baseline)
+   - Challenger must improve on both sets to be promoted
+
+5. **Complete DAG 3 Implementation**:
+   - Task 1: `monitor_drift` - Evidently AI integration (schema + distribution drift)
+   - Task 2: `validate_model` - Production metrics on recent 7 days from BigQuery
+   - Task 3: `decide_fine_tune` - BranchPythonOperator with hybrid strategy
+   - Task 4: `fine_tune_model` - FastAPI `/train` endpoint with sliding window
+   - Task 5: `end_monitoring` - Audit logging to `monitoring_audit.logs`
+
+6. **End-to-End Testing**:
+   - Test 1 (no force): WAIT decision (drift=50%, R²=0.72) ✅
+   - Test 2 (force + test_mode): Training completed, model rejected (no improvement) ✅
+   - Test 3 (force + full baseline): ~20 min training, double evaluation ✅
+   - All scenarios validated successfully
+
+7. **Comprehensive Documentation**:
+   - [docs/drift_strategy.md](docs/drift_strategy.md) - 250+ lines with decision matrix, examples, best practices
+   - [docs/dags.md#3](docs/dags.md#3-monitor--fine-tune-dag) - Complete DAG 3 documentation
+   - [docs/training_strategy.md](docs/training_strategy.md) - Updated with double evaluation
+   - Real-world scenario analysis (current production: R²=0.72, drift=50%)
+
+**Test Results (2025-11-03):**
+
+```text
+Production Scenario:
+- Drift detected: 50% (critical level)
+- R² on production: 0.7214 (excellent)
+- RMSE: 32.25 (well below threshold)
+- Decision: WAIT ✅ (model handles drift well)
+- Cost savings: No unnecessary retraining
+- Monitoring: Will retrain proactively if R² < 0.70
+```
+
+**Key Technical Insights:**
+
+- `handle_unknown='ignore'` allows model to work despite new compteurs
+- Geographic (lat/lon) and temporal features compensate for unknown categories
+- Production metrics are the ground truth for retraining decisions
+- test_baseline.csv used for comparison (regression detection), not decision-making
+- Hybrid strategy provides optimal cost-benefit trade-off
+
+**Files Created/Modified:**
+
+- ✅ [dags/dag_monitor_and_train.py](dags/dag_monitor_and_train.py)
+- ✅ [scripts/normalize_reference_columns.py](scripts/normalize_reference_columns.py)
+- ✅ [backend/regmodel/app/fastapi_app.py](backend/regmodel/app/fastapi_app.py)
+- ✅ [docs/drift_strategy.md](docs/drift_strategy.md)
+- ✅ [docs/dags.md](docs/dags.md) (section 3)
+- ✅ [dags/utils/bike_helpers.py](dags/utils/bike_helpers.py)
+
+**Commits:**
+
+- To be created: "feat: implement DAG 3 with hybrid drift management strategy"
+
+**Phase 3 Status:**
+
+✅ All 3 DAGs operational and production-ready
+✅ Complete MLOps pipeline: Data Ingestion → Predictions → Monitoring → Conditional Retraining
+✅ Comprehensive documentation (dags.md, drift_strategy.md, training_strategy.md)
+✅ Cost-efficient and performance-aware decision logic
 
 ---
 

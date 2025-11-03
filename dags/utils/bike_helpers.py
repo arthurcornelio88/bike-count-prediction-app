@@ -274,6 +274,15 @@ def create_monitoring_table_if_needed(
             bigquery.SchemaField("model_improvement", "FLOAT"),
             bigquery.SchemaField("env", "STRING"),
             bigquery.SchemaField("error_message", "STRING"),
+            # NEW: Double evaluation fields
+            bigquery.SchemaField("double_evaluation_enabled", "BOOL"),
+            bigquery.SchemaField("baseline_regression", "BOOL"),
+            bigquery.SchemaField("r2_baseline", "FLOAT"),
+            bigquery.SchemaField("r2_current", "FLOAT"),
+            bigquery.SchemaField("r2_train", "FLOAT"),
+            bigquery.SchemaField("deployment_decision", "STRING"),
+            bigquery.SchemaField("model_uri", "STRING"),
+            bigquery.SchemaField("run_id", "STRING"),
         ]
         table = bigquery.Table(full_table_id, schema=schema)
         client.create_table(table)

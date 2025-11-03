@@ -187,7 +187,8 @@ def evaluate_double(
     else:
         print(f"📥 Loading test_baseline from {test_baseline_path}")
         X_baseline, y_baseline = load_and_clean_data(test_baseline_path)
-        print(f"✅ Baseline test set loaded: {len(y_baseline)} samples")
+        test_baseline_size = len(y_baseline)
+        print(f"✅ Baseline test set loaded: {test_baseline_size} samples")
 
     # 2. Split current data (80/20) - use 20% for testing
     if len(current_data_df) < 200:
@@ -359,8 +360,104 @@ def train_rf(X, y, env, test_mode, data_source="reference", current_data_df=None
             mlflow.set_tag("double_evaluation", True)
             mlflow.log_metric("current_data_size", len(current_data_df))
 
+        # NEW: Implement sliding window training if current_data provided
+        test_current_df = None  # Will hold 20% of current_data for evaluation
+        X_train_final = X  # Default to baseline only
+        y_train_final = y
+
+        if current_data_df is not None and len(current_data_df) >= 200:
+            print("\n" + "=" * 60)
+            print("🔄 SLIDING WINDOW: Combining train_baseline + current_data")
+            print("=" * 60)
+
+            # 1. Split current_data (80% training, 20% evaluation)
+            train_current_df = current_data_df.sample(frac=0.8, random_state=42)
+            test_current_df = current_data_df.drop(train_current_df.index)
+
+            print(
+                f"   - Current data split: {len(train_current_df)} train / {len(test_current_df)} test"
+            )
+
+            # 2. Use baseline's pipeline to transform current_data (to match schema)
+            try:
+                # Create a temporary pipeline with baseline's transformers
+                # This ensures current_data gets the SAME transformations as baseline
+                from app.classes import RawCleanerTransformer, TimeFeatureTransformer
+
+                # Separate target from current data
+                if "Comptage horaire" in train_current_df.columns:
+                    y_current = train_current_df["Comptage horaire"].copy()
+                    train_current_df = train_current_df.drop(
+                        columns=["Comptage horaire"]
+                    )
+                elif "comptage_horaire" in train_current_df.columns:
+                    y_current = train_current_df["comptage_horaire"].copy()
+                    train_current_df = train_current_df.drop(
+                        columns=["comptage_horaire"]
+                    )
+                else:
+                    raise ValueError(
+                        "Target column 'Comptage horaire' not found in current_data"
+                    )
+
+                # Apply same transformations as baseline
+                cleaner = RawCleanerTransformer(keep_compteur=True)
+                train_current_clean = cleaner.fit_transform(train_current_df)
+
+                time_transformer = TimeFeatureTransformer()
+                X_current = time_transformer.fit_transform(train_current_clean)
+
+                # Ensure column alignment with baseline
+                common_cols = sorted(list(set(X.columns) & set(X_current.columns)))
+
+                if len(common_cols) < len(X.columns) * 0.8:  # Less than 80% overlap
+                    print(
+                        f"   ⚠️  Only {len(common_cols)}/{len(X.columns)} common columns - schema mismatch!"
+                    )
+                    print("   → Falling back to baseline-only training")
+                    mlflow.log_metric("sliding_window_enabled", 0)
+                    X_train_final = X
+                    y_train_final = y
+                else:
+                    # Filter both to common columns
+                    X_baseline_filtered = X[common_cols]
+                    X_current_filtered = X_current[common_cols]
+
+                    # Concatenate
+                    X_train_final = pd.concat(
+                        [X_baseline_filtered, X_current_filtered], ignore_index=True
+                    )
+                    y_train_final = np.concatenate([y, y_current.to_numpy()])
+
+                    print(f"   ✅ train_baseline: {len(X):,} samples")
+                    print(f"   ✅ train_current:  {len(X_current):,} samples")
+                    print(f"   ✅ TOTAL training: {len(X_train_final):,} samples")
+                    print(f"   ✅ Common features: {len(common_cols)} columns")
+                    print("   📊 New compteurs will be learned in model weights!")
+
+                    # Log sliding window metrics
+                    mlflow.log_metric("sliding_window_enabled", 1)
+                    mlflow.log_metric("train_baseline_size", len(X))
+                    mlflow.log_metric("train_current_size", len(X_current))
+                    mlflow.log_metric("train_total_size", len(X_train_final))
+                    mlflow.log_metric("common_features", len(common_cols))
+
+            except Exception as e:
+                print(f"⚠️ Sliding window failed, falling back to baseline only: {e}")
+                import traceback
+
+                print(traceback.format_exc())
+                mlflow.log_metric("sliding_window_enabled", 0)
+                X_train_final = X
+                y_train_final = y
+
+            print("=" * 60 + "\n")
+        else:
+            mlflow.log_metric("sliding_window_enabled", 0)
+
+        # Train model on combined data (baseline + current if sliding window succeeded)
         rf = RFPipeline()
-        rf.fit(X, y)
+        rf.fit(X_train_final, y_train_final)
 
         mlflow.log_param("rf_n_estimators", rf.model.n_estimators)
         mlflow.log_param("rf_max_depth", rf.model.max_depth)
@@ -376,13 +473,16 @@ def train_rf(X, y, env, test_mode, data_source="reference", current_data_df=None
 
         # NEW: Double evaluation if current_data provided
         double_eval_results = None
-        if current_data_df is not None and len(current_data_df) >= 200:
+        if (
+            test_current_df is not None and len(test_current_df) >= 40
+        ):  # Need at least 40 samples (20% of 200)
             try:
                 test_baseline_path = get_test_baseline_path(env)
+                # Use test_current_df (20%) from sliding window split above
                 double_eval_results = evaluate_double(
                     model=rf,
                     test_baseline_path=test_baseline_path,
-                    current_data_df=current_data_df,
+                    current_data_df=test_current_df,  # Use held-out 20% for evaluation
                     model_type="rf",
                     test_mode=test_mode,
                 )

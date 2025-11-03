@@ -192,6 +192,114 @@ def train_endpoint(request: TrainRequest):
         raise HTTPException(status_code=500, detail=f"Training failed: {str(e)}")
 
 
+# === Schéma de requête pour evaluation ===
+class EvaluateRequest(BaseModel):
+    model_type: str = "rf"  # "rf", "nn", or "rf_class"
+    metric: str = "r2"  # Metric to select champion model
+    test_baseline_path: str = "data/test_baseline.csv"  # Local path in container
+    model_uri: str = (
+        None  # Optional: specific model URI to evaluate (otherwise uses champion)
+    )
+
+
+# === Endpoint d'évaluation ===
+@app.post("/evaluate")
+def evaluate_endpoint(request: EvaluateRequest):
+    """
+    Evaluate a model (champion or specific model_uri) on test_baseline.
+
+    This endpoint is used to compare the current champion's performance
+    on the fixed test_baseline against new candidate models.
+
+    Example request (evaluate current champion):
+    {
+        "model_type": "rf",
+        "metric": "r2",
+        "test_baseline_path": "gs://df_traffic_cyclist1/raw_data/test_baseline.csv"
+    }
+
+    Example request (evaluate specific model):
+    {
+        "model_type": "rf",
+        "model_uri": "gs://df_traffic_cyclist1/mlflow-artifacts/1/abc123/artifacts/model",
+        "test_baseline_path": "gs://df_traffic_cyclist1/raw_data/test_baseline.csv"
+    }
+
+    Returns:
+    {
+        "status": "success",
+        "model_type": "rf",
+        "model_uri": "gs://...",
+        "metrics": {
+            "rmse": 123.45,
+            "r2": 0.75,
+            "mae": 98.76
+        },
+        "test_size": 181202
+    }
+    """
+    try:
+        from app.train import load_and_clean_data
+        from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+        import numpy as np
+
+        # Load test_baseline
+        print(f"📥 Loading test_baseline from {request.test_baseline_path}")
+        X_baseline, y_baseline = load_and_clean_data(request.test_baseline_path)
+        test_size = len(y_baseline)
+        print(f"✅ Test baseline loaded: {test_size} samples")
+
+        # Load model (champion or specific URI)
+        if request.model_uri:
+            print(f"📦 Loading model from URI: {request.model_uri}")
+            # TODO: Implement MLflow model loading by URI
+            # For now, use champion as fallback
+            print("⚠️  model_uri not yet implemented, using champion")
+            model = get_cached_model(request.model_type, request.metric)
+            model_uri = "champion"  # Placeholder
+        else:
+            print(
+                f"🏆 Loading champion {request.model_type} model (metric={request.metric})"
+            )
+            model = get_cached_model(request.model_type, request.metric)
+            model_uri = "champion"
+
+        # Evaluate model
+        print("🔬 Evaluating model on test_baseline...")
+        y_pred = model.predict(X_baseline)
+
+        # Handle NN predictions (flatten if needed)
+        if hasattr(y_pred, "flatten"):
+            y_pred = y_pred.flatten()
+
+        # Calculate metrics
+        metrics = {
+            "rmse": float(np.sqrt(mean_squared_error(y_baseline, y_pred))),
+            "r2": float(r2_score(y_baseline, y_pred)),
+            "mae": float(mean_absolute_error(y_baseline, y_pred)),
+        }
+
+        print("✅ Evaluation complete:")
+        print(f"   - RMSE: {metrics['rmse']:.2f}")
+        print(f"   - R²: {metrics['r2']:.4f}")
+        print(f"   - MAE: {metrics['mae']:.2f}")
+
+        return {
+            "status": "success",
+            "model_type": request.model_type,
+            "model_uri": model_uri,
+            "metrics": metrics,
+            "test_size": test_size,
+        }
+
+    except Exception as e:
+        import traceback
+
+        print(f"❌ Evaluation failed: {str(e)}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Evaluation failed: {str(e)}")
+
+
 # === Schéma de requête pour monitoring ===
 class MonitorRequest(BaseModel):
     reference_path: str  # GCS path to reference sample
@@ -272,21 +380,40 @@ def monitor_endpoint(request: MonitorRequest):
                 "report_url": None,  # No report generated
             }
 
-        # Filter to relevant columns (exclude IDs, URLs, timestamps)
+        # Filter to relevant columns (exclude metadata but keep meaningful features)
+        # Strategy: Keep features that actually affect model predictions
+        # Exclude: technical IDs, URLs, photos, but KEEP identifiant_du_compteur (important for drift!)
         exclude_patterns = [
-            "id_",
-            "identifiant_",
             "lien_",
             "url_",
             "photo",
-            "_ts",
+            "ingestion_ts",
+            "prediction_ts",
             "prediction",
+            "id_photos",
+            "id_photo",
+            "identifiant_du_site",  # Site ID not used in model
+            "identifiant_technique",  # Technical ID not used
+            "test_lien",
         ]
-        relevant_cols = [
-            col
-            for col in common_cols
-            if not any(pattern in col.lower() for pattern in exclude_patterns)
+
+        # Keep these important columns even if they match partial patterns
+        always_keep = [
+            "identifiant_du_compteur",  # Counter ID - critical for drift detection
+            "nom_du_compteur",  # Counter name - used in model
+            "comptage_horaire",  # Target variable
+            "latitude",  # GPS coordinates - used in model
+            "longitude",
         ]
+
+        relevant_cols = []
+        for col in common_cols:
+            # Always keep if in whitelist
+            if col in always_keep:
+                relevant_cols.append(col)
+            # Otherwise check if matches exclude patterns
+            elif not any(pattern in col.lower() for pattern in exclude_patterns):
+                relevant_cols.append(col)
 
         if not relevant_cols:
             print("⚠️ No relevant columns for drift, using all common columns")

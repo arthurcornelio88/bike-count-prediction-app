@@ -66,6 +66,12 @@ services:
       - ./data:/app/data:ro
     depends_on:
       - mlflow
+    deploy:
+      resources:
+        limits:
+          memory: 4G  # Increased for test_baseline.csv (132K rows)
+        reservations:
+          memory: 2G
     command: ["/app/.venv/bin/uvicorn", "app.fastapi_app:app", "--host", "0.0.0.0", "--port", "8000"]
 
   # ========================================
