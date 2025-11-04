@@ -17,6 +17,12 @@ from utils.bike_helpers import (
     create_monitoring_table_if_needed,
     get_reference_data_path,
 )
+from utils.discord_alerts import (
+    send_drift_alert,
+    send_performance_alert,
+    send_training_success,
+    send_training_failure,
+)
 
 
 # Configuration
@@ -43,7 +49,7 @@ def run_drift_monitoring(**context):
     # Load current data from BigQuery (last 7 days)
     query = f"""
     SELECT *
-    FROM `{ENV_CONFIG['BQ_PROJECT']}.{ENV_CONFIG['BQ_RAW_DATASET']}.comptage_velo`
+    FROM `{ENV_CONFIG["BQ_PROJECT"]}.{ENV_CONFIG["BQ_RAW_DATASET"]}.comptage_velo`
     WHERE date_et_heure_de_comptage >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
     LIMIT 1000
     """  # nosec B608
@@ -137,7 +143,7 @@ def validate_model(**context):
             p.identifiant_du_compteur,
             PARSE_TIMESTAMP('%Y-%m-%d %H:%M:%S%Ez', p.date_et_heure_de_comptage) as date_et_heure_de_comptage,
             p.prediction_ts
-        FROM `{ENV_CONFIG['BQ_PROJECT']}.{ENV_CONFIG['BQ_PREDICT_DATASET']}.daily_*` p
+        FROM `{ENV_CONFIG["BQ_PROJECT"]}.{ENV_CONFIG["BQ_PREDICT_DATASET"]}.daily_*` p
         WHERE _TABLE_SUFFIX >= FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY))
     ),
     recent_actuals AS (
@@ -145,7 +151,7 @@ def validate_model(**context):
             r.comptage_horaire as true_value,
             r.identifiant_du_compteur,
             r.date_et_heure_de_comptage
-        FROM `{ENV_CONFIG['BQ_PROJECT']}.{ENV_CONFIG['BQ_RAW_DATASET']}.comptage_velo` r
+        FROM `{ENV_CONFIG["BQ_PROJECT"]}.{ENV_CONFIG["BQ_RAW_DATASET"]}.comptage_velo` r
         WHERE r.date_et_heure_de_comptage >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
     )
     SELECT
@@ -266,6 +272,10 @@ def decide_if_fine_tune(**context):
         if drift:
             print(f"   → Drift also detected (drift share: {drift_share:.1%})")
         print("   → Action: Immediate retraining to restore performance")
+
+        # Send Discord alert for critical performance
+        send_performance_alert(r2, rmse, threshold=R2_WARNING)
+
         return "fine_tune_model"
 
     # PRIORITY 2: Critical drift + metrics declining → retrain preventively (PROACTIVE)
@@ -275,6 +285,13 @@ def decide_if_fine_tune(**context):
         print(f"   → R²: {r2:.4f} < {R2_WARNING} (declining, not critical yet)")
         print(f"   → Metrics still above critical ({R2_CRITICAL}) but trending down")
         print("   → Action: Proactive retraining to prevent further degradation")
+
+        # Send Discord alerts for drift and declining performance
+        send_drift_alert(
+            drift_share, r2, drifted_features=0
+        )  # features count from drift_summary if available
+        send_performance_alert(r2, rmse, threshold=R2_WARNING)
+
         return "fine_tune_model"
 
     # PRIORITY 3: Moderate-to-critical drift but metrics still good → monitor closely (WAIT)
@@ -288,6 +305,10 @@ def decide_if_fine_tune(**context):
             f"   → Will retrain if R² drops below {R2_WARNING} (proactive) or {R2_CRITICAL} (reactive)"
         )
         print("   → Action: Monitor closely, no retraining yet")
+
+        # Send drift alert (WARNING level) - no training needed yet
+        send_drift_alert(drift_share, r2, drifted_features=0)
+
         return "end_monitoring"
 
     # All good - no drift or low drift with good metrics
@@ -319,7 +340,7 @@ def fine_tune_model(**context):
     # Get fresh data from BigQuery (last 30 days for training)
     query = f"""
     SELECT *
-    FROM `{ENV_CONFIG['BQ_PROJECT']}.{ENV_CONFIG['BQ_RAW_DATASET']}.comptage_velo`
+    FROM `{ENV_CONFIG["BQ_PROJECT"]}.{ENV_CONFIG["BQ_RAW_DATASET"]}.comptage_velo`
     WHERE date_et_heure_de_comptage >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
     LIMIT 2000
     """  # nosec B608
@@ -576,6 +597,21 @@ def fine_tune_model(**context):
         context["ti"].xcom_push(key="run_id", value=result.get("run_id", "unknown"))
         context["ti"].xcom_push(key="error_message", value="")
 
+        # Send Discord notification for training completion
+        deployment_type = (
+            "deploy"
+            if "deploy" in decision
+            else "skip"
+            if "skip" in decision
+            else "reject"
+        )
+        send_training_success(
+            improvement_delta=r2_improvement_current,
+            new_r2=r2_current,
+            old_r2=current_champion_r2,
+            deployment_decision=deployment_type,
+        )
+
     except requests.exceptions.Timeout:
         error_msg = "Training API timeout (>10 minutes)"
         print(f"❌ {error_msg}")
@@ -584,6 +620,10 @@ def fine_tune_model(**context):
         context["ti"].xcom_push(key="model_improvement", value=0.0)
         context["ti"].xcom_push(key="baseline_regression", value=False)
         context["ti"].xcom_push(key="double_evaluation_enabled", value=False)
+
+        # Send Discord alert for training failure
+        dag_run_id = context.get("dag_run").run_id
+        send_training_failure(error_msg, dag_run_id)
     except Exception as e:
         error_msg = f"Training failed: {str(e)}"
         print(f"❌ {error_msg}")
@@ -592,6 +632,10 @@ def fine_tune_model(**context):
         context["ti"].xcom_push(key="model_improvement", value=0.0)
         context["ti"].xcom_push(key="baseline_regression", value=False)
         context["ti"].xcom_push(key="double_evaluation_enabled", value=False)
+
+        # Send Discord alert for training failure
+        dag_run_id = context.get("dag_run").run_id
+        send_training_failure(error_msg, dag_run_id)
 
 
 def end_monitoring(**context):

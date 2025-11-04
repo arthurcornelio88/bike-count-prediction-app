@@ -63,6 +63,20 @@ groups:
           summary: "Critical drift + declining R² - proactive retraining needed"
           description: "Drift share: {{ $value | humanizePercentage }}, R²: {{ $labels.r2 }}. Immediate action required."
 
+  - name: infrastructure
+    interval: 15s
+    rules:
+      # Service completely down
+      - alert: ServiceDown
+        expr: up == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: infrastructure
+        annotations:
+          summary: "Service {{ $labels.job }} is DOWN"
+          description: "{{ $labels.instance }} has been unreachable for more than 1 minute. MLOps pipeline may be broken."
+
   - name: api_health
     interval: 15s
     rules:

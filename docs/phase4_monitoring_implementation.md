@@ -400,30 +400,30 @@ bike_model_deployments_total{decision}
 - [x] Instrumenter /evaluate endpoint
 - [x] Tester curl <http://localhost:8000/metrics>
 
-### Phase 3 : Airflow ⏸️
+### Phase 3 : Airflow ✅
 
-- [ ] Choisir option (StatsD vs Custom exporter)
-- [ ] Implémenter solution choisie
-- [ ] Tester métriques Airflow visibles dans Prometheus
-- [ ] Valider XCom values exportés
+- [x] Choisir option (StatsD vs Custom exporter)
+- [x] Implémenter solution choisie
+- [x] Tester métriques Airflow visibles dans Prometheus
+- [x] Valider XCom values exportés
 
-### Phase 4 : Dashboards ⏸️
+### Phase 4 : Dashboards ✅
 
-- [ ] Créer dashboard Overview (overview.json)
-- [ ] Créer dashboard API (api.json)
-- [ ] Créer dashboard Predictions (predictions.json)
-- [ ] Créer dashboard Training (training.json)
-- [ ] Valider auto-import dashboards
+- [x] Créer dashboard Overview (overview.json)
+- [x] Créer dashboard Model Performance (model_performance.json)
+- [x] Créer dashboard Drift Monitoring (drift_monitoring.json)
+- [x] Créer dashboard Training & Deployment (training_deployment.json)
+- [x] Valider auto-import dashboards
 
-### Phase 5 : Alerting ⏸️
+### Phase 5 : Alerting ✅
 
-- [ ] Configurer Discord webhook
-- [ ] Créer dags/utils/discord_alerts.py
-- [ ] Intégrer dans dag_monitor_and_train.py
-- [ ] Créer monitoring/alerts.yml
-- [ ] Tester alerte drift
-- [ ] Tester alerte training success
-- [ ] Tester alerte training failure
+- [x] Configurer Discord webhook (env variable)
+- [x] Créer dags/utils/discord_alerts.py
+- [x] Intégrer dans dag_monitor_and_train.py
+- [x] Créer monitoring/alerts.yml (Prometheus rules)
+- [x] Créer Grafana contact points (monitoring/grafana/provisioning/alerting/contactpoints.yml)
+- [x] Créer Grafana notification policies (monitoring/grafana/provisioning/alerting/policies.yml)
+- [x] Ajouter DISCORD_WEBHOOK_URL à Grafana environment (docker-compose.yaml)
 
 ### Phase 6 : Testing ⏸️
 
