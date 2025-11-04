@@ -175,7 +175,7 @@ Métriques exposées :
 
 ---
 
-### Phase 4 : Grafana Dashboards (1h30) 📋 TODO
+### Phase 4 : Grafana Dashboards (1h30) ✅ COMPLETE
 
 #### Dashboard 1 : Overview (System Health)
 
