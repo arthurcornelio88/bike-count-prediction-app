@@ -19,6 +19,16 @@ from flask import Flask, Response
 from prometheus_client import Counter, Gauge, Histogram, generate_latest
 from requests.auth import HTTPBasicAuth
 
+try:
+    from google.cloud import bigquery
+
+    BIGQUERY_AVAILABLE = True
+except ImportError:
+    BIGQUERY_AVAILABLE = False
+    print(
+        "⚠️  google-cloud-bigquery not installed. BigQuery metrics will be unavailable."
+    )
+
 # === Prometheus Metrics ===
 
 # Generic Airflow metrics
@@ -199,6 +209,66 @@ class AirflowMetricsCollector:
             "daily_prediction",
             "monitor_and_fine_tune",
         ]
+        self.bq_client = None
+        if BIGQUERY_AVAILABLE:
+            try:
+                self.bq_client = bigquery.Client(
+                    project=os.getenv("GOOGLE_CLOUD_PROJECT", "datascientest-460618")
+                )
+                print("✅ BigQuery client initialized for reading audit logs")
+            except Exception as e:
+                print(f"⚠️  Failed to initialize BigQuery client: {e}")
+
+    def _get_latest_monitoring_metrics_from_bq(self) -> Optional[dict]:
+        """Fetch the latest monitoring metrics from BigQuery audit table.
+
+        Returns the most recent row from monitoring_audit.logs table.
+        """
+        if not self.bq_client:
+            return None
+
+        try:
+            query = """
+            SELECT
+                timestamp,
+                drift_detected,
+                r2,
+                rmse,
+                r2_baseline,
+                r2_current,
+                r2_train,
+                deployment_decision,
+                model_improvement,
+                fine_tune_success,
+                baseline_regression
+            FROM `datascientest-460618.monitoring_audit.logs`
+            ORDER BY timestamp DESC
+            LIMIT 1
+            """
+
+            query_job = self.bq_client.query(query)
+            results = list(query_job.result())
+
+            if results:
+                row = results[0]
+                metrics = {
+                    "timestamp": row.timestamp,
+                    "drift_detected": row.drift_detected,
+                    "r2": row.r2,
+                    "rmse": row.rmse,
+                    "r2_baseline": row.r2_baseline,
+                    "r2_current": row.r2_current,
+                    "r2_train": row.r2_train,
+                    "deployment_decision": row.deployment_decision,
+                    "model_improvement": row.model_improvement,
+                    "fine_tune_success": row.fine_tune_success,
+                    "baseline_regression": row.baseline_regression,
+                }
+                return metrics
+            return None
+        except Exception as e:
+            print(f"⚠️  Error querying BigQuery audit table: {e}")
+            return None
 
     def collect_all_metrics(self) -> None:
         """Collect metrics from all DAGs."""
@@ -344,7 +414,79 @@ class AirflowMetricsCollector:
             print(f"   - R²: {r2_float:.4f}")
 
     def _collect_monitoring_metrics(self, dag_id: str, dag_run_id: str) -> None:
-        """Collect metrics from DAG 3: monitor_and_fine_tune."""
+        """Collect metrics from DAG 3: monitor_and_fine_tune.
+
+        PRIORITY: Read from BigQuery audit table (source of truth).
+        FALLBACK: Read from Airflow XCom if BigQuery unavailable.
+        """
+        # Try BigQuery first (most reliable source)
+        bq_metrics = self._get_latest_monitoring_metrics_from_bq()
+
+        if bq_metrics:
+            print("   📊 Using metrics from BigQuery audit table (source of truth)")
+
+            # Drift metrics
+            if bq_metrics.get("drift_detected") is not None:
+                drift_detected = bool(bq_metrics["drift_detected"])
+                BIKE_DRIFT_DETECTED.set(1.0 if drift_detected else 0.0)
+                print(f"   - Drift detected: {drift_detected}")
+
+            # Model performance metrics - use deployed model metrics
+            deployment_decision = bq_metrics.get("deployment_decision")
+
+            if deployment_decision and "deploy" in str(deployment_decision):
+                # New model was deployed - use r2_current (new model on current test set)
+                r2 = bq_metrics.get("r2_current")
+                rmse = bq_metrics.get(
+                    "rmse"
+                )  # Note: rmse is for champion, but it's the best we have
+
+                if r2 is not None:
+                    r2_float = float(r2)
+                    BIKE_MODEL_R2_PRODUCTION.set(r2_float)
+                    print(f"   - Production R² (DEPLOYED MODEL): {r2_float:.4f}")
+
+                if rmse is not None:
+                    rmse_float = float(rmse)
+                    BIKE_MODEL_RMSE_PRODUCTION.set(rmse_float)
+                    print(f"   - Production RMSE (from audit log): {rmse_float:.2f}")
+            else:
+                # No new model deployed - use champion metrics
+                r2 = bq_metrics.get("r2")
+                rmse = bq_metrics.get("rmse")
+
+                if r2 is not None:
+                    r2_float = float(r2)
+                    BIKE_MODEL_R2_PRODUCTION.set(r2_float)
+                    print(f"   - Production R² (CHAMPION): {r2_float:.4f}")
+
+                if rmse is not None:
+                    rmse_float = float(rmse)
+                    BIKE_MODEL_RMSE_PRODUCTION.set(rmse_float)
+                    print(f"   - Production RMSE (CHAMPION): {rmse_float:.2f}")
+
+            # Training metrics
+            fine_tune_success = bq_metrics.get("fine_tune_success")
+            if fine_tune_success is not None:
+                status = "success" if fine_tune_success else "failed"
+                BIKE_TRAINING_RUNS.labels(status=status).inc(0)
+                print(f"   - Training status: {status}")
+
+            model_improvement = bq_metrics.get("model_improvement")
+            if model_improvement is not None:
+                improvement_float = float(model_improvement)
+                BIKE_MODEL_IMPROVEMENT_DELTA.set(improvement_float)
+                print(f"   - Model improvement: {improvement_float:+.4f}")
+
+            if deployment_decision is not None:
+                BIKE_MODEL_DEPLOYMENTS.labels(decision=str(deployment_decision)).inc(0)
+                print(f"   - Deployment decision: {deployment_decision}")
+
+            return  # Done with BigQuery metrics
+
+        # FALLBACK: Use XCom if BigQuery unavailable
+        print("   ⚠️  BigQuery unavailable, falling back to XCom")
+
         # Drift metrics - get drift_summary dict
         drift_summary = self.client.get_xcom_value(
             dag_id, dag_run_id, "monitor_drift", "drift_summary"
@@ -378,44 +520,19 @@ class AirflowMetricsCollector:
                 BIKE_DRIFTED_FEATURES_COUNT.set(float(drifted_count))
                 print(f"   - Drifted features: {drifted_count}")
 
-        # Model performance metrics (task: validate_model pushes r2, rmse, mae as floats)
+        # Model performance metrics from XCom (fallback)
         r2 = self.client.get_xcom_value(dag_id, dag_run_id, "validate_model", "r2")
         rmse = self.client.get_xcom_value(dag_id, dag_run_id, "validate_model", "rmse")
 
         if r2 is not None:
             r2_float = float(r2)
             BIKE_MODEL_R2_PRODUCTION.set(r2_float)
-            print(f"   - Production R²: {r2_float:.4f}")
+            print(f"   - Production R² (XCom fallback): {r2_float:.4f}")
 
         if rmse is not None:
             rmse_float = float(rmse)
             BIKE_MODEL_RMSE_PRODUCTION.set(rmse_float)
-            print(f"   - Production RMSE: {rmse_float:.2f}")
-
-        # Training metrics (task: fine_tune_model)
-        fine_tune_success = self.client.get_xcom_value(
-            dag_id, dag_run_id, "fine_tune_model", "fine_tune_success"
-        )
-        model_improvement = self.client.get_xcom_value(
-            dag_id, dag_run_id, "fine_tune_model", "model_improvement"
-        )
-        deployment_decision = self.client.get_xcom_value(
-            dag_id, dag_run_id, "fine_tune_model", "deployment_decision"
-        )
-
-        if fine_tune_success is not None:
-            status = "success" if fine_tune_success else "failed"
-            BIKE_TRAINING_RUNS.labels(status=status).inc(0)
-            print(f"   - Training status: {status}")
-
-        if model_improvement is not None:
-            improvement_float = float(model_improvement)
-            BIKE_MODEL_IMPROVEMENT_DELTA.set(improvement_float)
-            print(f"   - Model improvement: {improvement_float:+.4f}")
-
-        if deployment_decision is not None:
-            BIKE_MODEL_DEPLOYMENTS.labels(decision=str(deployment_decision)).inc(0)
-            print(f"   - Deployment decision: {deployment_decision}")
+            print(f"   - Production RMSE (XCom fallback): {rmse_float:.2f}")
 
 
 # === Flask App ===

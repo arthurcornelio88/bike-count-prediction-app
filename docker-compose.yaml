@@ -286,6 +286,10 @@ services:
       - AIRFLOW_USERNAME=${_AIRFLOW_WWW_USER_USERNAME:-admin}
       - AIRFLOW_PASSWORD=${_AIRFLOW_WWW_USER_PASSWORD:-admin}
       - PYTHONUNBUFFERED=1  # Disable Python output buffering
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp.json
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
+    volumes:
+      - ./gcp.json:/app/gcp.json:ro
     depends_on:
       - airflow-webserver
     restart: always

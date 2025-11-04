@@ -5,8 +5,8 @@ global:
   evaluation_interval: 15s  # Evaluate rules every 15 seconds
 
 # Alert rules (loaded from alerts.yml)
-rule_files:
-  - 'alerts.yml'
+# rule_files:
+#   - 'alerts.yml'
 
 # Scrape configuration
 scrape_configs:
