@@ -12,11 +12,18 @@ import argparse
 PUSHGATEWAY_URL = "localhost:9091"
 
 
-def push_metrics(registry, job_name="test_alerts"):
-    """Push metrics to Prometheus Pushgateway"""
+def push_metrics(registry):
+    """Push metrics to Prometheus Pushgateway with airflow-metrics job name"""
+    # Use the SAME job name as the real airflow-exporter to override real metrics
+    job_name = "airflow-metrics"
+    grouping_key = {"instance": "airflow-exporter:9101"}
+
     try:
-        push_to_gateway(PUSHGATEWAY_URL, job=job_name, registry=registry)
+        push_to_gateway(
+            PUSHGATEWAY_URL, job=job_name, registry=registry, grouping_key=grouping_key
+        )
         print(f"✅ Pushed metrics to {PUSHGATEWAY_URL}")
+        print(f"   Job: {job_name}, Instance: {grouping_key['instance']}")
     except Exception as e:
         print(f"❌ Failed to push metrics: {e}")
         print("   Ensure Pushgateway is running: docker compose ps pushgateway")
@@ -28,7 +35,7 @@ def test_high_drift():
     registry = CollectorRegistry()
     drift_share = Gauge("bike_drift_share", "Mock drift share", registry=registry)
     drift_share.set(0.65)  # 65% drift
-    push_metrics(registry, job_name="test_high_drift")
+    push_metrics(registry)
     print("   Injected: bike_drift_share=0.65")
     print("   Expected: 'High Data Drift Detected' alert in 15min")
 
@@ -39,7 +46,7 @@ def test_low_r2():
     registry = CollectorRegistry()
     r2 = Gauge("bike_model_r2_champion_current", "Mock R² score", registry=registry)
     r2.set(0.58)  # R² = 0.58
-    push_metrics(registry, job_name="test_low_r2")
+    push_metrics(registry)
     print("   Injected: bike_model_r2_champion_current=0.58")
     print("   Expected: 'Model R² Critically Low' alert in 5min")
 
@@ -50,7 +57,7 @@ def test_high_rmse():
     registry = CollectorRegistry()
     rmse = Gauge("bike_model_rmse_production", "Mock RMSE", registry=registry)
     rmse.set(85.0)  # RMSE = 85
-    push_metrics(registry, job_name="test_high_rmse")
+    push_metrics(registry)
     print("   Injected: bike_model_rmse_production=85.0")
     print("   Expected: 'Model RMSE Above Threshold' alert in 5min")
 
@@ -63,7 +70,7 @@ def test_critical_drift_and_r2():
     r2 = Gauge("bike_model_r2_champion_current", "Mock R² score", registry=registry)
     drift_share.set(0.55)  # 55% drift
     r2.set(0.68)  # R² = 0.68
-    push_metrics(registry, job_name="test_critical_combined")
+    push_metrics(registry)
     print("   Injected: bike_drift_share=0.55, bike_model_r2_champion_current=0.68")
     print("   Expected: 'Critical Drift + Declining R²' alert in 5min")
 
@@ -78,7 +85,7 @@ def test_api_error_rate():
     errors_total = Gauge("fastapi_errors_total", "Mock total errors", registry=registry)
     requests_total.set(1000)
     errors_total.set(120)  # 12% error rate
-    push_metrics(registry, job_name="test_api_errors")
+    push_metrics(registry)
     print("   Injected: fastapi_requests_total=1000, fastapi_errors_total=120")
     print("   Expected: 'API Error Rate High' alert in 5min")
 
@@ -91,7 +98,7 @@ def test_no_data_ingestion():
         "bike_records_ingested_total", "Mock ingested records", registry=registry
     )
     ingested.set(0)  # No data
-    push_metrics(registry, job_name="test_no_ingestion")
+    push_metrics(registry)
     print("   Injected: bike_records_ingested_total=0")
     print("   Expected: 'No Data Ingested' alert in 36h (long wait)")
 
@@ -102,7 +109,7 @@ def test_service_down():
     registry = CollectorRegistry()
     up = Gauge("up", "Mock service status", registry=registry)
     up.set(0)  # Service down
-    push_metrics(registry, job_name="test_service_down")
+    push_metrics(registry)
     print("   Injected: up=0")
     print("   Expected: 'Service Down' alert in 1min")
 
@@ -121,7 +128,7 @@ def restore_normal():
     Gauge("bike_records_ingested_total", "Ingested records", registry=registry).set(500)
     Gauge("up", "Service status", registry=registry).set(1)
 
-    push_metrics(registry, job_name="test_restore_normal")
+    push_metrics(registry)
     print("✅ All metrics restored to normal values")
 
 
