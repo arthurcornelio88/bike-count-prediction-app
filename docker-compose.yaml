@@ -118,7 +118,7 @@ services:
       AIRFLOW__CORE__LOAD_EXAMPLES: "false"
       AIRFLOW__API__AUTH_BACKEND: "airflow.api.auth.backend.basic_auth"
       AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
-      # Environment variables from .env.airflow
+      # Environment variables from .env
       ENV: ${ENV:-DEV}
       GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-datascientest-460618}
       GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp.json
@@ -129,6 +129,9 @@ services:
       GCS_BUCKET: ${GCS_BUCKET:-df_traffic_cyclist1}
       API_URL_DEV: ${API_URL_DEV}
       API_KEY_SECRET: ${API_KEY_SECRET:-dev-key-unsafe}
+      R2_CRITICAL: ${R2_CRITICAL}
+      R2_WARNING: ${R2_WARNING}
+      RMSE_THRESHOLD: ${RMSE_THRESHOLD}
       # Additional Python packages
       _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:- pandas scikit-learn requests google-cloud-bigquery google-cloud-storage gcsfs db-dtypes redis<5.0.0}
     volumes:
