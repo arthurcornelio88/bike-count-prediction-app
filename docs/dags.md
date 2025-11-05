@@ -212,11 +212,11 @@ Generates predictions by calling the ML API and stores results in BigQuery.
 
 **Key Features**:
 
-- **Recent Data Selection**: Queries last 24 hours of data for prediction
+- **Recent Data Selection**: Queries last 48 hours of data for prediction (allows ingestion delays)
 
   ```sql
   SELECT * FROM bike_traffic_raw.comptage_velo
-  WHERE date_et_heure_de_comptage >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
+  WHERE date_et_heure_de_comptage >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR)
   ORDER BY date_et_heure_de_comptage DESC
   LIMIT 500
   ```
