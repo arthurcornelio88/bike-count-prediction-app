@@ -682,6 +682,9 @@ def end_monitoring(**context):
     deployment_decision = context["ti"].xcom_pull(
         task_ids="fine_tune_model", key="deployment_decision"
     )
+    champion_r2_baseline = context["ti"].xcom_pull(
+        task_ids="fine_tune_model", key="champion_r2_baseline"
+    )
     model_uri = context["ti"].xcom_pull(task_ids="fine_tune_model", key="model_uri")
     run_id = context["ti"].xcom_pull(task_ids="fine_tune_model", key="run_id")
 
@@ -697,6 +700,7 @@ def end_monitoring(**context):
         r2_current = None
         r2_train = None
         deployment_decision = "not_triggered"
+        champion_r2_baseline = None
         model_uri = ""
         run_id = ""
     else:
@@ -726,6 +730,9 @@ def end_monitoring(**context):
         "deployment_decision": deployment_decision
         if deployment_decision
         else "not_triggered",
+        "champion_r2_baseline": float(champion_r2_baseline)
+        if champion_r2_baseline is not None
+        else None,
         "model_uri": model_uri if model_uri else "",
         "run_id": run_id if run_id else "",
     }

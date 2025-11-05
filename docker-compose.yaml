@@ -100,7 +100,8 @@ services:
     image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.10.0-python3.12}
     environment: &airflow-common-env
       AIRFLOW__CORE__EXECUTOR: CeleryExecutor
-      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow  # Kept for entrypoint compatibility
       AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres-airflow/airflow
       AIRFLOW__CELERY__BROKER_URL: redis://:@redis-airflow:6379/0
       AIRFLOW__CORE__FERNET_KEY: ""
@@ -117,7 +118,7 @@ services:
       BQ_PREDICT_DATASET: ${BQ_PREDICT_DATASET:-bike_traffic_predictions}
       BQ_LOCATION: ${BQ_LOCATION:-europe-west1}
       GCS_BUCKET: ${GCS_BUCKET:-df_traffic_cyclist1}
-      API_URL_DEV: ${API_URL_DEV:-http://regmodel-backend:8000}
+      API_URL_DEV: ${API_URL_DEV}
       API_KEY_SECRET: ${API_KEY_SECRET:-dev-key-unsafe}
       # Additional Python packages
       _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:- pandas scikit-learn requests google-cloud-bigquery google-cloud-storage gcsfs db-dtypes}
@@ -131,11 +132,8 @@ services:
       - ./models:/app/models  # Model artifacts (dev only, prod uses GCS)
     user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-50000}"
     depends_on:
-      redis-airflow:
-        condition: service_healthy
-      postgres-airflow:
-        condition: service_healthy
-
+      - postgres-airflow
+      - redis-airflow
   postgres-airflow:
     image: postgres:15-alpine
     container_name: postgres-airflow
@@ -167,60 +165,133 @@ services:
     <<: *airflow-common
     container_name: airflow-webserver
     command: webserver
+    environment:
+      <<: *airflow-common-env
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+      _AIRFLOW_DB_MIGRATE: "false"
+    env_file:
+      - .env
     ports:
       - "8081:8080"
-    healthcheck:
-      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
-      interval: 10s
-      timeout: 10s
-      retries: 5
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      redis-airflow:
+        condition: service_healthy
+      airflow-init:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+      regmodel-backend:
+        condition: service_started
     restart: always
 
   airflow-scheduler:
     <<: *airflow-common
     container_name: airflow-scheduler
     command: scheduler
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"',
-        ]
-      interval: 10s
-      timeout: 10s
-      retries: 5
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: "false"
+    env_file:
+      - .env
+    depends_on:
+      airflow-init:
+        condition: service_healthy
+      airflow-webserver:
+        condition: service_started
     restart: always
 
   airflow-worker:
     <<: *airflow-common
     container_name: airflow-worker
     command: celery worker
-    healthcheck:
-      test:
-        - "CMD-SHELL"
-        - 'celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
-      interval: 10s
-      timeout: 10s
-      retries: 5
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: "false"
+    env_file:
+      - .env
+    depends_on:
+      airflow-init:
+        condition: service_healthy
+      airflow-webserver:
+        condition: service_started
     restart: always
 
   airflow-init:
     <<: *airflow-common
     container_name: airflow-init
-    command: version
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        function wait_for_postgres() {
+          echo "Waiting for postgres to be ready..."
+          while ! nc -z postgres-airflow 5432; do
+            sleep 1
+          done
+          echo "Postgres is ready!"
+        }
+
+        wait_for_postgres
+
+        if [[ -z "$${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN:-}" ]]; then
+          echo "ERROR: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN is not set!"
+          exit 1
+        fi
+
+        echo "Initializing Airflow database..."
+        airflow db init
+
+        echo "Upgrading Airflow database..."
+        airflow db upgrade
+
+        echo "Creating admin user..."
+        airflow users create \
+          --username "$${_AIRFLOW_WWW_USER_USERNAME}" \
+          --firstname "Admin" \
+          --lastname "User" \
+          --role "Admin" \
+          --email "admin@example.com" \
+          --password "$${_AIRFLOW_WWW_USER_PASSWORD}" || echo "User already exists"
+
+        echo "Airflow initialization complete!"
+
+        # Keep container alive for healthcheck
+        while true; do
+          echo "Airflow DB is ready and initialized" > /tmp/airflow-init-status
+          sleep 5
+        done
     environment:
       <<: *airflow-common-env
-      _AIRFLOW_DB_UPGRADE: "true"
-      _AIRFLOW_WWW_USER_CREATE: "true"
       _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-admin}
       _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-admin}
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/airflow-init-status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      redis-airflow:
+        condition: service_healthy
 
   flower:
     <<: *airflow-common
     container_name: flower
-    command: celery flower
+    command: flower  # Airflow 2.10.0 removed 'celery' prefix
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: "false"
     ports:
       - "5555:5555"
+    depends_on:
+      airflow-init:
+        condition: service_healthy
+      airflow-webserver:
+        condition: service_started
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:5555/"]
       interval: 10s

@@ -733,8 +733,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "bike_model_r2_production",
-          "legendFormat": "Production Model",
+          "expr": "bike_model_r2_champion_current",
+          "legendFormat": "Champion (test_current)",
           "refId": "A"
         },
         {
@@ -742,12 +742,118 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "bike_prediction_r2",
-          "legendFormat": "Prediction Model",
+          "expr": "bike_model_r2_challenger_current",
+          "legendFormat": "Challenger (test_current)",
           "refId": "B"
         }
       ],
-      "title": "Champion vs Challenger R²",
+      "title": "Champion vs Challenger R² (test_current)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "axisCenteredZero": false,
+            "axisColorMode": "text",
+            "axisLabel": "R² Score",
+            "axisPlacement": "auto",
+            "barAlignment": 0,
+            "drawStyle": "line",
+            "fillOpacity": 20,
+            "gradientMode": "none",
+            "hideFrom": {
+              "tooltip": false,
+              "viz": false,
+              "legend": false
+            },
+            "lineInterpolation": "linear",
+            "lineWidth": 2,
+            "pointSize": 5,
+            "scaleDistribution": {
+              "type": "linear"
+            },
+            "showPoints": "auto",
+            "spanNulls": false,
+            "stacking": {
+              "group": "A",
+              "mode": "none"
+            },
+            "thresholdsStyle": {
+              "mode": "line"
+            }
+          },
+          "mappings": [],
+          "max": 1,
+          "min": 0,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 0.65
+              },
+              {
+                "color": "green",
+                "value": 0.7
+              }
+            ]
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 20
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "calcs": ["mean", "lastNotNull", "max", "min"],
+          "displayMode": "table",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "single",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "bike_model_r2_champion_baseline",
+          "legendFormat": "Champion (test_baseline)",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus"
+          },
+          "expr": "bike_model_r2_challenger_baseline",
+          "legendFormat": "Challenger (test_baseline)",
+          "refId": "B"
+        }
+      ],
+      "title": "Champion vs Challenger R² (test_baseline)",
       "type": "timeseries"
     },
     {
@@ -806,9 +912,9 @@
       },
       "gridPos": {
         "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 20
+        "w": 24,
+        "x": 0,
+        "y": 28
       },
       "id": 9,
       "options": {

@@ -59,6 +59,199 @@ def send_discord_message(
 
 
 # ============================================================================
+# Daily Operations Alerts
+# ============================================================================
+
+
+def send_ingestion_success(records_count: int, table_name: str) -> bool:
+    """
+    Notify when data ingestion succeeds (INFO level).
+
+    Args:
+        records_count: Number of records ingested
+        table_name: BigQuery table name
+
+    Returns:
+        bool: True if sent successfully
+    """
+    description = (
+        "✅ Daily data ingestion completed successfully.\n\n"
+        "**Impact**: New bike traffic data available for predictions."
+    )
+
+    fields = [
+        {"name": "Records Ingested", "value": str(records_count), "inline": True},
+        {"name": "Table", "value": table_name, "inline": True},
+        {"name": "Status", "value": "Success", "inline": True},
+    ]
+
+    return send_discord_message(
+        title="Data Ingestion Completed",
+        description=description,
+        color=0x00FF00,  # Green
+        fields=fields,
+    )
+
+
+def send_ingestion_failure(error_msg: str) -> bool:
+    """
+    Alert when data ingestion fails (CRITICAL level).
+
+    Args:
+        error_msg: Error description
+    Returns:
+        bool: True if sent successfully
+    """
+    description = (
+        "🚨 CRITICAL: Daily data ingestion failed.\n\n"
+        f"**Error**: {error_msg[:200]}\n\n"
+        "**Impact**: No new data for predictions - pipeline broken."
+    )
+
+    fields = [
+        {"name": "Action", "value": "Check API status and logs", "inline": False},
+    ]
+
+    return send_discord_message(
+        title="Data Ingestion Failed",
+        description=description,
+        color=0xFF0000,  # Red
+        fields=fields,
+    )
+
+
+def send_no_new_data_alert(last_data_date: str) -> bool:
+    """
+    Alert when no new data is available (WARNING level).
+
+    Args:
+        last_data_date: Date of last available data
+
+    Returns:
+        bool: True if sent successfully
+    """
+    description = (
+        "⚠️  WARNING: No new bike traffic data available.\n\n"
+        "**Impact**: Model predictions may become stale over time."
+    )
+
+    fields = [
+        {"name": "Last Data Date", "value": last_data_date, "inline": True},
+        {"name": "Action", "value": "Monitor API availability", "inline": True},
+    ]
+
+    return send_discord_message(
+        title="No New Data Available",
+        description=description,
+        color=0xFFA500,  # Orange
+        fields=fields,
+    )
+
+
+def send_prediction_success(predictions_count: int, r2: float, rmse: float) -> bool:
+    """
+    Notify when predictions succeed (INFO level).
+
+    Args:
+        predictions_count: Number of predictions generated
+        r2: Model R² score
+        rmse: Model RMSE
+
+    Returns:
+        bool: True if sent successfully
+    """
+    description = (
+        "✅ Daily predictions completed successfully.\n\n"
+        "**Impact**: New bike traffic predictions available."
+    )
+
+    fields = [
+        {"name": "Predictions", "value": str(predictions_count), "inline": True},
+        {"name": "R² Score", "value": f"{r2:.4f}", "inline": True},
+        {"name": "RMSE", "value": f"{rmse:.2f}", "inline": True},
+    ]
+
+    return send_discord_message(
+        title="Predictions Generated",
+        description=description,
+        color=0x00FF00,  # Green
+        fields=fields,
+    )
+
+
+def send_prediction_failure(error_msg: str, api_endpoint: str) -> bool:
+    """
+    Alert when predictions fail (CRITICAL level).
+
+    Args:
+        error_msg: Error description
+        api_endpoint: Prediction API endpoint
+
+    Returns:
+        bool: True if sent successfully
+    """
+    description = (
+        "🚨 CRITICAL: Daily predictions failed.\n\n"
+        f"**Error**: {error_msg[:200]}\n\n"
+        "**Impact**: No predictions available - model may be broken."
+    )
+
+    fields = [
+        {"name": "API Endpoint", "value": api_endpoint, "inline": False},
+        {
+            "name": "Action",
+            "value": "Check prediction API and model status",
+            "inline": False,
+        },
+    ]
+
+    return send_discord_message(
+        title="Predictions Failed",
+        description=description,
+        color=0xFF0000,  # Red
+        fields=fields,
+    )
+
+
+def send_degraded_metrics_alert(r2: float, threshold: float = 0.70) -> bool:
+    """
+    Alert when prediction metrics are degraded (WARNING level).
+
+    Args:
+        r2: Current R² score
+        threshold: R² threshold (default 0.70)
+
+    Returns:
+        bool: True if sent successfully
+    """
+    if r2 < 0.60:
+        severity = "🚨 CRITICAL"
+        impact = "Predictions are unreliable - immediate retraining required."
+        color = 0xFF0000  # Red
+    else:
+        severity = "⚠️  WARNING"
+        impact = "Predictions may be less reliable - retraining recommended soon."
+        color = 0xFFA500  # Orange
+
+    description = (
+        f"{severity}: Prediction metrics are degraded.\n\n**Impact**: {impact}"
+    )
+
+    fields = [
+        {"name": "R² Score", "value": f"{r2:.4f}", "inline": True},
+        {"name": "Threshold", "value": f"{threshold:.2f}", "inline": True},
+        {"name": "Status", "value": "Degraded", "inline": True},
+    ]
+
+    return send_discord_message(
+        title="Prediction Metrics Degraded",
+        description=description,
+        color=color,
+        fields=fields,
+    )
+
+
+# ============================================================================
 # Drift & Performance Alerts
 # ============================================================================
 

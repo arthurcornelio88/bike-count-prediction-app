@@ -213,11 +213,11 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "bike_model_r2_production",
+          "expr": "bike_model_r2_champion_current",
           "refId": "A"
         }
       ],
-      "title": "Production R²",
+  "title": "Champion R² (test_current)",
       "type": "gauge"
     },
     {

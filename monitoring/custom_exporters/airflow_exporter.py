@@ -120,6 +120,24 @@ BIKE_MODEL_DEPLOYMENTS = Counter(
     labelnames=("decision",),  # deploy, skip, reject
 )
 
+# Double evaluation - Complete metrics (4 R² values)
+BIKE_MODEL_R2_CHAMPION_BASELINE = Gauge(
+    "bike_model_r2_champion_baseline",
+    "Champion model R² on test_baseline (fixed reference, 181K samples)",
+)
+BIKE_MODEL_R2_CHAMPION_CURRENT = Gauge(
+    "bike_model_r2_champion_current",
+    "Champion model R² on test_current (new distribution, 20% split)",
+)
+BIKE_MODEL_R2_CHALLENGER_BASELINE = Gauge(
+    "bike_model_r2_challenger_baseline",
+    "Challenger model R² on test_baseline (regression check, threshold 0.60)",
+)
+BIKE_MODEL_R2_CHALLENGER_CURRENT = Gauge(
+    "bike_model_r2_challenger_current",
+    "Challenger model R² on test_current (improvement check vs champion)",
+)
+
 # === Airflow API Client ===
 
 
@@ -240,7 +258,8 @@ class AirflowMetricsCollector:
                 deployment_decision,
                 model_improvement,
                 fine_tune_success,
-                baseline_regression
+                baseline_regression,
+                champion_r2_baseline
             FROM `datascientest-460618.monitoring_audit.logs`
             ORDER BY timestamp DESC
             LIMIT 1
@@ -263,6 +282,7 @@ class AirflowMetricsCollector:
                     "model_improvement": row.model_improvement,
                     "fine_tune_success": row.fine_tune_success,
                     "baseline_regression": row.baseline_regression,
+                    "champion_r2_baseline": row.champion_r2_baseline,
                 }
                 return metrics
             return None
@@ -431,39 +451,53 @@ class AirflowMetricsCollector:
                 BIKE_DRIFT_DETECTED.set(1.0 if drift_detected else 0.0)
                 print(f"   - Drift detected: {drift_detected}")
 
-            # Model performance metrics - use deployed model metrics
-            deployment_decision = bq_metrics.get("deployment_decision")
+            # === DOUBLE EVALUATION METRICS ===
+            # Extract all 4 R² values from BigQuery
+            champion_r2_current = bq_metrics.get("r2")  # From validate_model task
+            champion_r2_baseline = bq_metrics.get(
+                "champion_r2_baseline"
+            )  # Champion eval on baseline
+            challenger_r2_baseline = bq_metrics.get(
+                "r2_baseline"
+            )  # Challenger eval on baseline
+            challenger_r2_current = bq_metrics.get(
+                "r2_current"
+            )  # Challenger eval on current
+            rmse_champion = bq_metrics.get("rmse")  # Champion RMSE
 
-            if deployment_decision and "deploy" in str(deployment_decision):
-                # New model was deployed - use r2_current (new model on current test set)
-                r2 = bq_metrics.get("r2_current")
-                rmse = bq_metrics.get(
-                    "rmse"
-                )  # Note: rmse is for champion, but it's the best we have
+            print("\n   📊 Double Evaluation Metrics:")
 
-                if r2 is not None:
-                    r2_float = float(r2)
-                    BIKE_MODEL_R2_PRODUCTION.set(r2_float)
-                    print(f"   - Production R² (DEPLOYED MODEL): {r2_float:.4f}")
+            # Champion metrics
+            if champion_r2_current is not None:
+                r2_float = float(champion_r2_current)
+                BIKE_MODEL_R2_CHAMPION_CURRENT.set(r2_float)
+                # Legacy metric (backward compatibility)
+                BIKE_MODEL_R2_PRODUCTION.set(r2_float)
+                print(f"   - Champion R² (test_current): {r2_float:.4f}")
 
-                if rmse is not None:
-                    rmse_float = float(rmse)
-                    BIKE_MODEL_RMSE_PRODUCTION.set(rmse_float)
-                    print(f"   - Production RMSE (from audit log): {rmse_float:.2f}")
-            else:
-                # No new model deployed - use champion metrics
-                r2 = bq_metrics.get("r2")
-                rmse = bq_metrics.get("rmse")
+            if champion_r2_baseline is not None:
+                r2_float = float(champion_r2_baseline)
+                BIKE_MODEL_R2_CHAMPION_BASELINE.set(r2_float)
+                print(f"   - Champion R² (test_baseline): {r2_float:.4f}")
 
-                if r2 is not None:
-                    r2_float = float(r2)
-                    BIKE_MODEL_R2_PRODUCTION.set(r2_float)
-                    print(f"   - Production R² (CHAMPION): {r2_float:.4f}")
+            # Challenger metrics
+            if challenger_r2_baseline is not None:
+                r2_float = float(challenger_r2_baseline)
+                BIKE_MODEL_R2_CHALLENGER_BASELINE.set(r2_float)
+                print(f"   - Challenger R² (test_baseline): {r2_float:.4f}")
 
-                if rmse is not None:
-                    rmse_float = float(rmse)
-                    BIKE_MODEL_RMSE_PRODUCTION.set(rmse_float)
-                    print(f"   - Production RMSE (CHAMPION): {rmse_float:.2f}")
+            if challenger_r2_current is not None:
+                r2_float = float(challenger_r2_current)
+                BIKE_MODEL_R2_CHALLENGER_CURRENT.set(r2_float)
+                # Legacy metric (backward compatibility)
+                BIKE_PREDICTION_R2.set(r2_float)
+                print(f"   - Challenger R² (test_current): {r2_float:.4f}")
+
+            # RMSE
+            if rmse_champion is not None:
+                rmse_float = float(rmse_champion)
+                BIKE_MODEL_RMSE_PRODUCTION.set(rmse_float)
+                print(f"   - Champion RMSE: {rmse_float:.2f}")
 
             # Training metrics
             fine_tune_success = bq_metrics.get("fine_tune_success")
@@ -478,6 +512,7 @@ class AirflowMetricsCollector:
                 BIKE_MODEL_IMPROVEMENT_DELTA.set(improvement_float)
                 print(f"   - Model improvement: {improvement_float:+.4f}")
 
+            deployment_decision = bq_metrics.get("deployment_decision")
             if deployment_decision is not None:
                 BIKE_MODEL_DEPLOYMENTS.labels(decision=str(deployment_decision)).inc(0)
                 print(f"   - Deployment decision: {deployment_decision}")
