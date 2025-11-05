@@ -321,6 +321,18 @@ services:
       - monitoring  # Only starts with: docker compose --profile monitoring up
 
   # ========================================
+  # Prometheus Pushgateway (for testing alerts)
+  # ========================================
+  pushgateway:
+    image: prom/pushgateway:latest
+    container_name: pushgateway
+    ports:
+      - "9091:9091"
+    restart: always
+    profiles:
+      - monitoring
+
+  # ========================================
   # Grafana (Dashboards)
   # ========================================
   grafana:

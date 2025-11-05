@@ -24,6 +24,13 @@ scrape_configs:
     metrics_path: '/metrics'
     scrape_interval: 30s  # Exporter caches for 60s, so 30s is good
 
+  # Pushgateway (for testing alerts with mock metrics)
+  - job_name: 'pushgateway'
+    honor_labels: true  # Preserve job labels from pushed metrics
+    static_configs:
+      - targets: ['pushgateway:9091']
+    scrape_interval: 5s  # Fast scraping for testing
+
   # Prometheus self-monitoring
   - job_name: 'prometheus'
     static_configs:
