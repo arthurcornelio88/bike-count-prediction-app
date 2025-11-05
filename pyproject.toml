@@ -20,6 +20,7 @@ dependencies = [
     "pandas>=2.2.3",
     "pillow>=11.2.1",
     "plotly>=6.1.2",
+    "prometheus-client>=0.23.1",
     "pyngrok>=7.2.8",
     "pytest>=8.4.2",
     "pytest-cov>=7.0.0",
