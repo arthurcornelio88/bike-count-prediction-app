@@ -1,0 +1,26 @@
+# Grafana Contact Points Auto-provisioning
+# Configure Discord webhook for Prometheus alerts
+
+apiVersion: 1
+
+contactPoints:
+  - orgId: 1
+    name: discord-mlops
+    receivers:
+      - uid: discord-mlops-webhook
+        type: discord
+        settings:
+          url: ${DISCORD_WEBHOOK_URL}
+          title: "MLOps Alert - {{ .GroupLabels.alertname }}"
+          message: |
+            **Severity**: {{ .GroupLabels.severity }}
+            **Component**: {{ .GroupLabels.component }}
+
+            {{ range .Alerts }}
+            **Alert**: {{ .Labels.alertname }}
+            **Summary**: {{ .Annotations.summary }}
+            **Description**: {{ .Annotations.description }}
+            **Status**: {{ .Status }}
+            {{ end }}
+          use_discord_username: true
+        disableResolveMessage: false

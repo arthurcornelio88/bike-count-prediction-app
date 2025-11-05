@@ -5,10 +5,14 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "dvc>=3.63.0",
+    "dvc-gs>=3.0.2",
+    "evidently>=0.4.0",
     "fastapi==0.115.12",
     "folium>=0.20.0",
     "fsspec>=2025.5.0",
     "gcsfs>=2025.5.0.post1",
+    "google-cloud-secret-manager>=2.24.0",
     "ipykernel>=6.29.5",
     "matplotlib>=3.10.3",
     "mlflow==2.22.0",
@@ -16,11 +20,25 @@ dependencies = [
     "pandas>=2.2.3",
     "pillow>=11.2.1",
     "plotly>=6.1.2",
+    "prometheus-client>=0.23.1",
     "pyngrok>=7.2.8",
+    "pytest>=8.4.2",
+    "pytest-cov>=7.0.0",
     "scikit-learn>=1.6.1",
     "seaborn>=0.13.2",
     "streamlit>=1.45.1",
     "streamlit-folium>=0.25.0",
     "tensorflow-cpu>=2.13.0",
     "uvicorn>=0.34.2",
+]
+
+[dependency-groups]
+dev = [
+    "bandit>=1.8.0",
+    "httpx>=0.28.1",
+    "mypy>=1.13.0",
+    "pandas-stubs>=2.2.0",
+    "pre-commit>=4.0.0",
+    "ruff>=0.14.0",
+    "types-pytz>=2025.2.0.20250809",
 ]

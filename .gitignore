@@ -9,8 +9,25 @@ wheels/
 # Virtual environments
 .venv
 
-# data
-data/
+# Testing and coverage
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+coverage.xml
+
+# data (ignore CSV files but allow .dvc metadata)
+data/*.csv
+data/*.bak
+data/*.parquet
+!data/*.dvc
+
+# Linter and formatter caches
+.mypy_cache/
+.ruff_cache/
+
+# Application local configs
+.streamlit/
 
 # models
 mlruns/
@@ -20,6 +37,7 @@ models/
 
 # gcredentials
 gcp.json
+gcp-production.json
 backend/cloud_run/gcp.json
 backend/render/gcp.json
 backend/cloud_run/.env
@@ -28,9 +46,24 @@ secrets.toml
 mlflow-trainer.json
 mlflow-ui-access.json
 
+# Environment files with secrets
+.env
+.env.local
+.env.production
+.env.*.local
+!.env.production.template
+!.env.airflow
+
 # streamlit cloud
 .devcontainer/
 
 models/*
 tmp_nn_model/
 summary.json
+
+# dags
+ref_dags/
+
+# Airflow logs and shared data (dev only, prod uses GCS)
+logs/
+shared_data/

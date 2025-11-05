@@ -1,215 +1,459 @@
-# 🚲 Bike Count Prediction
+# 🚲 Bike Traffic Prediction - MLOps Production Pipeline
 
-### (Streamlit + MLflow + GCS + Custom Registry)
+[![CI Tests](https://github.com/arthurcornelio88/ds_traffic_cyclist1/actions/workflows/ci.yml/badge.svg)](https://github.com/arthurcornelio88/ds_traffic_cyclist1/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/arthurcornelio88/ds_traffic_cyclist1/branch/master/graph/badge.svg)](https://codecov.io/gh/arthurcornelio88/ds_traffic_cyclist1)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
+[![type: mypy](https://img.shields.io/badge/type-mypy-blue.svg)](https://github.com/python/mypy)
 
-A lightweight, production-ready ML app to predict **hourly bicycle traffic** in Paris using a **Random Forest**, a **Neural Network**, or a **binary classifier** for affluence detection.
+**Version 2.0.0** - Production-ready MLOps pipeline for predicting hourly bike traffic in Paris. Features automated data ingestion from Paris Open Data API, intelligent drift detection with sliding window training, champion/challenger model system with double evaluation, real-time monitoring via Prometheus + Grafana, and Discord alerting for critical events. Orchestrated with Airflow, tracked with MLflow (Cloud SQL backend), and deployed with FastAPI. All infrastructure runs locally via Docker Compose with 15 services. Production Kubernetes deployment under construction.
 
-> 👉 Try it live: [Streamlit App](https://dstrafficcyclist1.streamlit.app)
+---
+
+## 🚀 Quick Start
+
+### Local Development (All Services)
+
+```bash
+# Start full MLOps stack (MLflow, Airflow, FastAPI, Monitoring)
+./scripts/start-all.sh --with-monitoring
+
+# Access services
+open http://localhost:5000   # MLflow tracking
+open http://localhost:8081   # Airflow (admin / see .env)
+open http://localhost:8000   # FastAPI API docs
+open http://localhost:3000   # Grafana (admin / see .env)
+open http://localhost:9090   # Prometheus
+```
+
+### Trigger DAGs
+
+```bash
+# DAG 1: Ingest data from Paris Open Data API
+docker exec airflow-webserver airflow dags trigger fetch_comptage_daily
+
+# DAG 2: Generate predictions
+docker exec airflow-webserver airflow dags trigger daily_prediction
+
+# DAG 3: Monitor & train (with force flag)
+docker exec airflow-webserver airflow dags trigger monitor_and_fine_tune \
+  --conf '{"force_fine_tune": true, "test_mode": false}'
+```
 
 ---
 
 ## 🎯 Features
 
-* 🧠 Predict with **Random Forest**, **Neural Net**, or **Affluence Classifier**
-* 🌍 **Zero backend** deployable via **Streamlit Cloud**
-* ☁️ Uses **GCS-hosted model artifacts**
-* 🔁 Supports real-time & batch predictions
-* 📦 Leverages a custom **`summary.json` registry** (no MLflow needed at inference)
+### MLOps Core
+- ✅ **Champion/Challenger System** - Explicit model promotion with double evaluation
+- ✅ **Sliding Window Training** - Learns from fresh data (660K baseline + 1.6K current)
+- ✅ **Drift Detection** - Evidently-based monitoring with hybrid retraining strategy
+- ✅ **Real-time Monitoring** - Prometheus metrics + 4 Grafana dashboards
+- ✅ **Discord Alerting** - Critical events, training failures, champion promotions
+
+### Data Pipeline
+- ✅ **Automated Ingestion** - Daily fetch from Paris Open Data API → BigQuery
+- ✅ **Prediction Pipeline** - Daily ML predictions on last 7 days
+- ✅ **Audit Logs** - All training runs, drift metrics, deployment decisions tracked
+
+### Model Registry
+- ✅ **MLflow Tracking** - Cloud SQL PostgreSQL backend + GCS artifacts
+- ✅ **Custom Registry** - `summary.json` for fast model loading
+- ✅ **Priority Loading** - Champion models loaded first regardless of metrics
+
+### Quality Assurance
+- ✅ **68% Code Coverage** - 47 tests across 4 suites
+- ✅ **CI/CD Pipeline** - GitHub Actions with Codecov integration
+- ✅ **Pre-commit Hooks** - Ruff, MyPy, Bandit, YAML validation
 
 ---
 
-## 🛠️ Architecture Overview
+## 📊 Architecture Overview
 
-```mermaid
-graph TD
-  A[User Input / CSV]-->B[Streamlit App]
-  B-->C[summary.json in GCS]
-  C-->D[Download model from GCS]
-  D-->E[Predict & Return Results]
+### 3-Layer MLOps Stack
 
-  subgraph Offline Training
-    F[train.py]
-    F-->G[Train model (RF/NN/Class)]
-    G-->H[Export to GCS]
-    G-->I[Update summary.json]
-  end
+```
+┌─────────────────────────────────────────────────────────┐
+│  LAYER 3: MLOps (Training & Monitoring)                 │
+│  • DAG 3: Monitor & Train (weekly)                      │
+│  • Sliding window training (660K + 1.6K samples)        │
+│  • Double evaluation (test_baseline + test_current)     │
+│  • Champion promotion + Discord alerts                  │
+└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  LAYER 2: DataOps (Ingestion & Predictions)             │
+│  • DAG 1: Daily data ingestion → BigQuery               │
+│  • DAG 2: Daily predictions (last 7 days)               │
+│  • 3 BigQuery datasets (raw, predictions, audit)        │
+└─────────────────────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────┐
+│  LAYER 1: InfraOps (Services & Storage)                 │
+│  • 15 Docker services (MLflow, Airflow, FastAPI)        │
+│  • GCP: BigQuery, Cloud SQL, GCS                        │
+│  • Monitoring: Prometheus, Grafana, airflow-exporter    │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Docker Services (15 containers)
+
+**Core Stack**:
+- `mlflow` (port 5000) - Tracking server with Cloud SQL backend
+- `regmodel-backend` (port 8000) - FastAPI with 5 endpoints
+- `airflow-webserver` (port 8081) - DAG management UI
+- `airflow-scheduler` - Task scheduling
+- `airflow-worker` - Celery task execution
+- `cloud-sql-proxy` - Secure Cloud SQL connection
+
+**Monitoring Stack** (`--profile monitoring`):
+- `prometheus` (port 9090) - Metrics collection
+- `grafana` (port 3000) - 4 dashboards (overview, performance, drift, training)
+- `airflow-exporter` (port 9101) - Custom MLOps metrics
+
+**Supporting Services**:
+- `postgres-airflow` - Airflow metadata DB
+- `redis-airflow` - Celery broker
+- `flower` (port 5555) - Celery monitoring
+
+---
+
+## 📁 Project Structure
+
+```
+├── backend/regmodel/app/       # FastAPI backend
+│   ├── fastapi_app.py          # API endpoints (/train, /predict, /promote_champion)
+│   ├── train.py                # Training logic (sliding window)
+│   ├── model_registry_summary.py  # Custom registry (summary.json)
+│   └── middleware/             # Prometheus metrics middleware
+├── dags/                       # Airflow DAGs
+│   ├── dag_daily_fetch_data.py      # Data ingestion (daily @ 02:00)
+│   ├── dag_daily_prediction.py      # Predictions (daily @ 04:00)
+│   ├── dag_monitor_and_train.py     # Monitor & train (weekly @ Sunday)
+│   └── utils/discord_alerts.py      # Discord webhook integration
+├── monitoring/                 # Monitoring configuration
+│   ├── grafana/provisioning/   # 4 dashboards + alerting rules
+│   ├── prometheus.yml          # Scrape config (3 targets)
+│   └── custom_exporters/       # airflow_exporter.py (MLOps metrics)
+├── scripts/                    # Utility scripts
+│   ├── start-all.sh            # Start all services (with/without monitoring)
+│   ├── restart-airflow.sh      # Reset Airflow password
+│   └── reset-airflow-password.sh
+├── data/                       # Training data (DVC tracked)
+│   ├── train_baseline.csv      # 660K samples (69.7%)
+│   └── test_baseline.csv       # 181K samples (30.3%)
+├── docs/                       # Documentation (20+ files)
+│   ├── MLOPS_ROADMAP.md        # Complete project roadmap
+│   ├── training_strategy.md    # Sliding window + drift management
+│   ├── ARCHITECTURE_DIAGRAM_GUIDE.md  # Excalidraw guide (3 layers)
+│   ├── DEMO_SCRIPT.md          # 2-minute video demo script
+│   └── monitoring/             # Monitoring docs (4 files)
+├── tests/                      # Test suite (47 tests, 68% coverage)
+│   ├── test_pipelines.py       # RF, NN pipeline validation
+│   ├── test_preprocessing.py   # Transformer logic
+│   ├── test_api_regmodel.py    # FastAPI endpoints
+│   └── test_model_registry.py  # Registry logic
+├── docker-compose.yaml         # 15 services (6GB memory for training)
+└── .github/workflows/ci.yml    # CI/CD pipeline
 ```
 
 ---
 
-## ⚡ MLflow-Free Inference
+## 🔧 Setup & Installation
 
-Rather than querying the MLflow registry at runtime, we:
+### Prerequisites
 
-* Maintain a lightweight **`summary.json`** in GCS
-* Store only the **best model per type/env/test\_mode**
-* Load models in Streamlit directly from GCS
+- Docker & Docker Compose
+- GCP credentials (service account JSON)
+- Python 3.11+ (for local development)
 
-✅ Benefits:
-
-* No dependency on a running MLflow instance
-* Fast cold-starts
-* Seamless hosting on **Streamlit Cloud**
-
----
-
-## 🚀 Streamlit Cloud Deployment
-
-### 1. Push your repo
-
-Make sure to include:
-
-* `app/streamlit_app.py`
-* `requirements.txt`
-* `.streamlit/secrets.toml` (locally only)
-
-### 2. Select entry point
-
-Via [https://share.streamlit.io](https://share.streamlit.io):
-
-```
-app/streamlit_app.py
-```
-
-### 3. Configure GCP Secrets (Streamlit Cloud)
-
-Add your **service account JSON** via the Streamlit Cloud UI (as secrets):
-
-```toml
-env = "PROD"
-
-[gcp_service_account]
-type = "service_account"
-project_id = "..."
-private_key_id = "..."
-private_key = "-----BEGIN PRIVATE KEY-----\n...\n-----END PRIVATE KEY-----\n"
-client_email = "..."
-...
-```
-
-The app will detect and write this to `/tmp/gcp.json` automatically at runtime.
-
----
-
-## 🧪 Local Development & Training
-
-### ✅ Local `.streamlit/secrets.toml`
-
-Create a local file at `.streamlit/secrets.toml` with the same structure as above. This makes `st.secrets["gcp_service_account"]` work identically in both local and cloud environments.
-
-```toml
-env = "DEV"
-
-[gcp_service_account]
-# your full service account key
-```
-
-> ⚠️ If missing, fallback to `./gcp.json` is supported for dev.
-
----
-
-### ⚙️ Setup
+### 1. Clone & Install
 
 ```bash
+git clone https://github.com/arthurcornelio88/ds_traffic_cyclist1.git
+cd ds_traffic_cyclist1
+
+# Install dependencies (local dev)
 uv init
 uv venv
 uv sync
 source .venv/bin/activate
 ```
 
-### 🔁 Train models locally
+### 2. Configure GCP Credentials
 
 ```bash
-# Train fast subset
-python src/train.py --env dev --model_test
-
-# Full train + GCS export
-python src/train.py --env prod
+# Place service account JSON in project root
+# File: mlflow-trainer.json (for training + model upload)
 ```
 
-### 🧪 Run local UI
+**Required GCP Services**:
+- BigQuery (3 datasets: raw, predictions, audit)
+- Cloud SQL PostgreSQL (MLflow metadata)
+- GCS bucket: `gs://df_traffic_cyclist1/`
+
+See [docs/secrets.md](docs/secrets.md) for detailed setup.
+
+### 3. Start Services
 
 ```bash
-streamlit run app/streamlit_app.py
-```
+# Option 1: Core services only (MLflow, Airflow, FastAPI)
+./scripts/start-all.sh
 
----
+# Option 2: With monitoring (Prometheus + Grafana)
+./scripts/start-all.sh --with-monitoring
 
-## 🧭 MLflow Tracking (Optional)
-
-For model monitoring & experiment tracking.
-
-### In DEV
-
-```bash
-export GOOGLE_APPLICATION_CREDENTIALS=./mlflow-ui-access.json
-
-mlflow server \
-  --backend-store-uri file:./mlruns_dev \
-  --default-artifact-root file:./mlruns_dev/artifacts \
-  --host 127.0.0.1 \
-  --port 5000
-```
-
-### In PROD
-
-```bash
-export GOOGLE_APPLICATION_CREDENTIALS=./mlflow-ui-access.json
-
-mlflow server \
-  --backend-store-uri file:./mlruns_prod \
-  --default-artifact-root gs://df_traffic_cyclist1/mlruns \
-  --serve-artifacts \
-  --host 127.0.0.1 \
-  --port 5000
+# Check logs
+docker compose logs -f regmodel-backend
+docker compose logs -f airflow-scheduler
 ```
 
 ---
 
-## 🔐 GCP Service Account Structure
+## 🧪 Development
 
-This project uses **three separate GCP service accounts**:
-
-| ID                    | Role                    | Used for                     |
-| --------------------- | ----------------------- | ---------------------------- |
-| `mlflow-trainer`      | `Storage Object Admin`  | Model training + upload      |
-| `mlflow-ui-access`    | `Storage Object Viewer` | MLflow UI display (optional) |
-| `gcp_service_account` | `Storage Object Viewer` | Inference from Streamlit     |
-
----
-
-## 📁 Project Structure
+### Run Tests
 
 ```bash
-app/
-├── app_config.py              # Force import path
-├── streamlit_app.py           # Streamlit UI
-├── train.py                   # Training CLI
-├── model_registry_summary.py  # Custom GCS registry
-├── classes.py                 # Pipeline classes (RF, NN, RFC)
-data/
-models/
-mlruns/                        # Optional MLflow tracking
-.streamlit/
-└── secrets.toml               # Local secrets
+# All tests with coverage
+uv run pytest tests/ -v --cov
+
+# Specific test suite
+uv run pytest tests/test_api_regmodel.py -v
+
+# Generate HTML coverage report
+uv run pytest tests/ --cov --cov-report=html
+open htmlcov/index.html
+```
+
+### Pre-commit Hooks
+
+```bash
+# Install hooks
+uv run pre-commit install
+
+# Run manually
+uv run pre-commit run --all-files
+```
+
+### Train Champion Model Locally
+
+```bash
+# Quick test (1K samples)
+python backend/regmodel/app/train.py \
+  --model-type rf \
+  --data-source baseline \
+  --model-test \
+  --env dev
+
+# Full production training (660K samples)
+python backend/regmodel/app/train.py \
+  --model-type rf \
+  --data-source baseline \
+  --env dev
 ```
 
 ---
 
-## 💡 Tips
+## 📡 API Endpoints
 
-* GCS is read-only from Streamlit — perfect for stateless inference
-* Local `.streamlit/secrets.toml` ensures smooth dev/prod parity
-* Supports easily extending new model types via `classes.py`
+### FastAPI (port 8000)
+
+**Base URL**: `http://localhost:8000`
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/train` | POST | Train model with sliding window |
+| `/predict` | POST | Generate predictions (returns champion metadata) |
+| `/evaluate` | POST | Evaluate champion on test_baseline |
+| `/drift` | POST | Detect data drift (Evidently) |
+| `/promote_champion` | POST | Promote model to champion status |
+| `/metrics` | GET | Prometheus metrics (scraped every 15s) |
+| `/docs` | GET | Interactive API documentation |
+
+**Example: Train via API**
+
+```bash
+curl -X POST "http://localhost:8000/train" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model_type": "rf",
+    "data_source": "baseline",
+    "test_mode": false,
+    "env": "dev"
+  }'
+```
 
 ---
 
-## 👨‍🔬 Authors
+## 📊 Monitoring & Dashboards
+
+### Grafana Dashboards (4 total)
+
+Access: `http://localhost:3000` (admin / see `.env`)
+
+1. **MLOps - Overview**
+   - Drift status (50% detected)
+   - Champion R² (0.78)
+   - API request rate & error rate
+   - Services health
+
+2. **MLOps - Model Performance**
+   - R² trends (champion vs challenger)
+   - RMSE: 32.5
+   - API latency percentiles (P50/P95/P99)
+
+3. **MLOps - Drift Monitoring**
+   - Drift evolution over time
+   - Drifted features count
+   - R² vs drift correlation
+
+4. **MLOps - Training & Deployment**
+   - Training success rate (100%)
+   - Deployment decisions (deploy/skip/reject)
+   - Model improvement delta
+
+### Prometheus Metrics (15+ custom)
+
+**Key Metrics**:
+- `bike_model_r2_champion_current` - Champion R² on recent data
+- `bike_drift_detected` - Binary drift flag (0/1)
+- `bike_training_runs_total` - Training runs counter
+- `bike_model_deployments_total` - Deployment decisions
+- `fastapi_requests_total` - API request rate
+- `fastapi_request_duration_seconds` - API latency
+
+See [docs/monitoring/03_metrics_reference.md](docs/monitoring/03_metrics_reference.md) for full catalog.
+
+---
+
+## 🎬 Demo Video (2 minutes)
+
+See [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) for video presentation guide:
+
+1. **Infrastructure startup** (0:00-0:15) - Start all services
+2. **Data pipeline** (0:15-0:45) - DAG 1 & 2, Discord alerts, BigQuery
+3. **MLOps pipeline** (0:45-1:30) - DAG 3 training, champion promotion
+4. **Grafana dashboards** (1:30-2:00) - 4 dashboards overview
+
+---
+
+## 📚 Documentation
+
+### Core Documentation
+- [MLOPS_ROADMAP.md](MLOPS_ROADMAP.md) - Complete project roadmap (5 phases)
+- [docs/training_strategy.md](docs/training_strategy.md) - Sliding window + drift management
+- [docs/architecture.md](docs/architecture.md) - MLflow & model registry
+- [docs/dags.md](docs/dags.md) - Airflow DAG reference (3 DAGs)
+
+### Setup Guides
+- [docs/mlflow_cloudsql.md](docs/mlflow_cloudsql.md) - MLflow Cloud SQL setup
+- [docs/bigquery_setup.md](docs/bigquery_setup.md) - BigQuery pipeline
+- [docs/secrets.md](docs/secrets.md) - GCS credentials & Secret Manager
+- [docs/dvc.md](docs/dvc.md) - Data versioning
+
+### Monitoring
+- [docs/monitoring/01_architecture.md](docs/monitoring/01_architecture.md) - Monitoring overview
+- [docs/monitoring/02_alerting.md](docs/monitoring/02_alerting.md) - Alert configuration
+- [docs/monitoring/03_metrics_reference.md](docs/monitoring/03_metrics_reference.md) - Metrics catalog
+- [docs/monitoring/04_dashboards_explained.md](docs/monitoring/04_dashboards_explained.md) - Dashboard guide
+
+### Presentation Materials
+- [docs/ARCHITECTURE_DIAGRAM_GUIDE.md](docs/ARCHITECTURE_DIAGRAM_GUIDE.md) - Excalidraw guide (3 layers)
+- [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) - 2-minute video demo script
+
+---
+
+## 🚧 Version History
+
+### Version 2.0.0 (Current - November 2025)
+
+**Status**: Local development ready, production Kubernetes deployment under construction
+
+**Major Features**:
+- ✅ Production MLOps pipeline (Airflow, MLflow, FastAPI)
+- ✅ Champion/Challenger system with double evaluation
+- ✅ Sliding window training (660K + 1.6K samples)
+- ✅ Real-time monitoring (Prometheus + Grafana)
+- ✅ Discord alerting
+- 🚧 Kubernetes deployment (under construction)
+- 🚧 Production GCP deployment (under construction)
+
+### Version 1.0.0 (Legacy)
+
+**Features**:
+- Streamlit frontend for manual predictions
+- Basic MLflow tracking (local only)
+- Single model registry (`summary.json`)
+- No automated orchestration
+
+**Note**: V1 frontend (Streamlit) is deprecated in V2. Focus shifted to automated MLOps pipeline.
+
+---
+
+## 🔑 Key Technical Decisions
+
+### Data Strategy
+- **Unified baseline**: 905K records from `current_api_data.csv` (2024-09-01 → 2025-10-10)
+- **Temporal split**: 660K train (69.7%) + 181K test (30.3%)
+- **DVC tracking**: Data versioned with GCS remote storage
+
+### Drift Management
+- **Hybrid strategy**: Proactive (preventive) + Reactive (corrective) triggers
+- **Thresholds**: R² < 0.65 (critical), drift ≥ 50% (proactive)
+- **Decision matrix**: 5 priority levels (force, reactive, proactive, wait, all good)
+
+### Training Strategy
+- **Sliding window**: Concatenate train_baseline (660K) + train_current (1.6K)
+- **Double evaluation**: test_baseline (regression check) + test_current (improvement check)
+- **Deployment logic**: REJECT (R² < 0.60) / SKIP (no improvement) / DEPLOY (R² gain > 0.02)
+
+---
+
+## 🐛 Troubleshooting
+
+### Airflow password issues
+```bash
+./scripts/reset-airflow-password.sh
+# Default: admin / admin
+```
+
+### Container memory issues
+```bash
+# Check memory usage
+docker stats
+
+# Restart with clean slate
+docker compose down -v
+./scripts/start-all.sh --with-monitoring
+```
+
+### MLflow connection issues
+See [docs/mlflow_cloudsql.md](docs/mlflow_cloudsql.md) for Cloud SQL troubleshooting.
+
+### Training failures
+Check Discord alerts or Airflow logs:
+```bash
+docker compose logs -f airflow-scheduler
+```
+
+---
+
+## 👥 Contributors
 
 Built with ❤️ by:
 
-* [Arthur Cornélio](https://github.com/arthurcornelio88)
-* [Ibtihel Nemri](https://github.com/ibtihelnemri)
-* [Bruno Happi](https://github.com/brunoCo-de)
+- [Arthur Cornélio](https://github.com/arthurcornelio88)
+- [Ibtihel Nemri](https://github.com/ibtihelnemri)
+- [Bruno Happi](https://github.com/brunoCo-de)
+- [Laurène Attia](https://github.com/laureneatt)
 
 ---
+
+## 📄 License
+
+This project is part of a DataScientest MLOps training program.
+
+---
+
+**Last Updated**: November 2025
+**Version**: 2.0.0
+**Status**: Local ready, Kubernetes deployment under construction

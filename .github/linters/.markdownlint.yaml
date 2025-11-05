@@ -1,0 +1,46 @@
+# Markdownlint Configuration
+
+# MD013: Line length
+MD013:
+  # Disable line length check (too strict for technical docs)
+  line_length: 120
+  # Ignore code blocks, tables, headings
+  code_blocks: false
+  tables: false
+  headings: false
+
+# MD024: No duplicate headings
+MD024:
+  # Allow duplicate headings in different sections (common in API docs)
+  siblings_only: true
+
+# MD029: Ordered list item prefix
+MD029: false  # Allow flexible numbering in nested lists
+
+# MD051: Link fragments
+MD051: false  # Disable link fragment validation (too strict for internal links)
+
+# MD033: Inline HTML
+MD033:
+  # Allow inline HTML (needed for images, badges, etc.)
+  allowed_elements:
+    - img
+    - br
+    - a
+    - details
+    - summary
+
+# MD040: Fenced code language
+MD040:
+  # Allow fenced code blocks without language (for generic examples)
+  allowed_languages: []
+
+# MD025: Multiple top-level headings
+MD025: false  # Allow multiple H1 in documentation
+
+# MD041: First line in file should be a top level heading
+MD041: false  # Not always needed
+
+# MD046: Code block style
+MD046:
+  style: fenced  # Prefer fenced code blocks (```)

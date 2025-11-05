@@ -1,0 +1,499 @@
+# Grafana Alert Rules Auto-provisioning
+# Converted from Prometheus alert rules for Bike Traffic MLOps
+# These rules query Prometheus and trigger notifications via configured contact points
+
+apiVersion: 1
+
+groups:
+  # ========================================
+  # Model Performance Alerts
+  # ========================================
+  - name: model_performance
+    orgId: 1
+    folder: MLOps Alerts
+    interval: 30s
+    rules:
+      # Critical: Model R² below 0.65 (reactive threshold)
+      - uid: model_performance_critical
+        title: Model R² Critically Low
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: bike_model_r2_champion_current
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params:
+                      - 0.65
+                    type: lt
+                  operator:
+                    type: and
+        noDataState: NoData
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: Model R² critically low (< 0.65)
+          description: Production model R² is below critical threshold of 0.65. Immediate retraining required.
+        labels:
+          severity: critical
+          component: model
+
+      # Warning: Model R² below 0.70 (proactive threshold)
+      - uid: model_performance_warning
+        title: Model R² Declining
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: bike_model_r2_champion_current
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params:
+                      - 0.65
+                      - 0.70
+                    type: within_range
+                  operator:
+                    type: and
+        noDataState: NoData
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: Model R² declining (< 0.70)
+          description: Production model R² is between 0.65 and 0.70. Consider proactive retraining if drift is high.
+        labels:
+          severity: warning
+          component: model
+
+      # High RMSE
+      - uid: model_rmse_high
+        title: Model RMSE Above Threshold
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: bike_model_rmse_production
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params:
+                      - 70
+                    type: gt
+                  operator:
+                    type: and
+        noDataState: NoData
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: Model RMSE above threshold (> 70)
+          description: Production model RMSE exceeds acceptable threshold of 70.
+        labels:
+          severity: critical
+          component: model
+
+  # ========================================
+  # Data Drift Alerts
+  # ========================================
+  - name: data_drift
+    orgId: 1
+    folder: MLOps Alerts
+    interval: 30s
+    rules:
+      # High drift detected
+      - uid: high_drift_detected
+        title: High Data Drift Detected
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: bike_drift_share
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            relativeTimeRange:
+              from: 900
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params:
+                      - 0.5
+                    type: gt
+                  operator:
+                    type: and
+        noDataState: NoData
+        execErrState: Alerting
+        for: 15m
+        annotations:
+          summary: High data drift detected (> 50%)
+          description: Drift share is above 50%. Multiple features have drifted from training distribution.
+        labels:
+          severity: warning
+          component: drift
+
+      # Critical drift with declining performance
+      - uid: critical_drift_with_performance
+        title: Critical Drift + Declining R²
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: '(bike_drift_share > 0.5) and (bike_model_r2_champion_current < 0.70)'
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: gt
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: Critical drift + declining R² - proactive retraining needed
+          description: Both drift share is high (> 50%) and R² is declining (< 0.70). Immediate action required.
+        labels:
+          severity: critical
+          component: drift
+
+  # ========================================
+  # Infrastructure Alerts
+  # ========================================
+  - name: infrastructure
+    orgId: 1
+    folder: MLOps Alerts
+    interval: 20s
+    rules:
+      # Service completely down
+      - uid: service_down
+        title: Service Down
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 120
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: up
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: 120
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            relativeTimeRange:
+              from: 120
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params:
+                      - 1
+                    type: lt
+                  operator:
+                    type: and
+        noDataState: Alerting
+        execErrState: Alerting
+        for: 1m
+        annotations:
+          summary: Service is DOWN
+          description: Service has been unreachable for more than 1 minute. MLOps pipeline may be broken.
+        labels:
+          severity: critical
+          component: infrastructure
+
+  # ========================================
+  # API Health Alerts
+  # ========================================
+  - name: api_health
+    orgId: 1
+    folder: MLOps Alerts
+    interval: 20s
+    rules:
+      # High error rate
+      - uid: api_error_rate_high
+        title: API Error Rate High
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: rate(fastapi_errors_total[5m]) / rate(fastapi_requests_total[5m])
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            relativeTimeRange:
+              from: 300
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params:
+                      - 0.05
+                    type: gt
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Alerting
+        for: 5m
+        annotations:
+          summary: API error rate above 5%
+          description: API error rate has exceeded 5% over the last 5 minutes. Check application logs.
+        labels:
+          severity: critical
+          component: api
+
+      # NOTE: prediction_latency_seconds and training_runs_total metrics removed
+      # These were defined in FastAPI but never exposed/instrumented
+      # Use bike_* metrics from airflow-exporter instead (source of truth)
+
+  # ========================================
+  # Airflow Health Alerts
+  # ========================================
+  - name: airflow_health
+    orgId: 1
+    folder: MLOps Alerts
+    interval: 30s
+    rules:
+      # NOTE: airflow_task_failures_total metric removed
+      # This metric is not exposed by airflow-exporter
+      # Use Airflow UI for task failure monitoring
+
+      # Long-running DAG
+      - uid: airflow_dag_too_slow
+        title: DAG Running Too Long
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: airflow_dag_run_duration_seconds{dag_id="monitor_and_fine_tune"}
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            relativeTimeRange:
+              from: 600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params:
+                      - 3600
+                    type: gt
+                  operator:
+                    type: and
+        noDataState: OK
+        execErrState: Alerting
+        for: 10m
+        annotations:
+          summary: DAG monitor_and_fine_tune taking > 1 hour
+          description: DAG has been running for more than 1 hour. Possible stuck task.
+        labels:
+          severity: warning
+          component: airflow
+
+  # ========================================
+  # Data Ingestion Alerts
+  # ========================================
+  - name: data_ingestion
+    orgId: 1
+    folder: MLOps Alerts
+    interval: 30s
+    rules:
+      # No data ingested
+      - uid: no_data_ingested
+        title: No Data Ingested
+        condition: C
+        data:
+          - refId: A
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: prometheus
+            model:
+              expr: increase(bike_records_ingested_total[1h])
+              intervalMs: 1000
+              maxDataPoints: 43200
+          - refId: B
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: reduce
+              expression: A
+              reducer: last
+          - refId: C
+            relativeTimeRange:
+              from: 3600
+              to: 0
+            datasourceUid: __expr__
+            model:
+              type: threshold
+              expression: B
+              conditions:
+                - evaluator:
+                    params:
+                      - 0
+                    type: eq
+                  operator:
+                    type: and
+        noDataState: NoData
+        execErrState: Alerting
+        for: 36h
+        annotations:
+          summary: No bike data ingested in 2 hours
+          description: Data ingestion DAG may be failing or no new data available from Paris Open Data API.
+        labels:
+          severity: warning
+          component: ingestion
+
+      # NOTE: "low_data_ingestion" alert removed (redundant)
+      # Same metric (bike_records_ingested_total) as "no_data_ingested"
+      # Keeping only the more critical alert (no data at all)

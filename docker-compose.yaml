@@ -1,10 +1,96 @@
-version: "3.9"
-
 services:
+  # ========================================
+  # Cloud SQL Proxy (MLflow Backend)
+  # ========================================
+  cloud-sql-proxy:
+    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:latest
+    # platform: auto-detected based on host architecture
+    container_name: cloud-sql-proxy
+    command:
+      - "--address=0.0.0.0"
+      - "--port=5432"
+      - "--health-check"
+      - "${MLFLOW_INSTANCE_CONNECTION}"
+    volumes:
+      - ./gcp.json:/config:ro
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/config
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  # ========================================
+  # MLflow Tracking Server (with Cloud SQL)
+  # ========================================
+  mlflow:
+    image: ghcr.io/mlflow/mlflow:v2.22.0
+    # platform: auto-detected based on host architecture
+    container_name: mlflow-server
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./mlflow-ui-access.json:/mlflow/gcp.json:ro  # Service account with bucket read/write access
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/mlflow/gcp.json
+      - MLFLOW_DB_USER=${MLFLOW_DB_USER}
+      - MLFLOW_DB_PASSWORD=${MLFLOW_DB_PASSWORD}
+      - MLFLOW_DB_NAME=${MLFLOW_DB_NAME}
+    env_file:
+      - .env
+    depends_on:
+      - cloud-sql-proxy
+    # Install dependencies and start MLflow with Cloud SQL backend
+    # Wait for proxy to be ready before starting MLflow
+    entrypoint: /bin/bash -c "pip install google-cloud-storage psycopg2-binary && echo 'Waiting for Cloud SQL proxy...' && python -c \"import socket, time, sys; [(sys.exit(0) if socket.socket(socket.AF_INET, socket.SOCK_STREAM).connect_ex(('cloud-sql-proxy', 5432)) == 0 else time.sleep(2)) for _ in range(30)]\" && python -c \"import urllib.parse, os; print('postgresql://' + os.environ['MLFLOW_DB_USER'] + ':' + urllib.parse.quote_plus(os.environ['MLFLOW_DB_PASSWORD']) + '@cloud-sql-proxy:5432/' + os.environ['MLFLOW_DB_NAME'])\" > /tmp/db_uri && mlflow server --backend-store-uri $$(cat /tmp/db_uri) --default-artifact-root gs://df_traffic_cyclist1/mlflow-artifacts --host 0.0.0.0 --port 5000"
+    restart: unless-stopped
+
+  # ========================================
+  # RegModel API (main service)
+  # ========================================
+  regmodel-backend:
+    build:
+      context: backend/regmodel
+      dockerfile: Dockerfile
+      # platform: auto-detected based on host architecture (works for both arm64 and amd64)
+    container_name: regmodel-api
+    ports:
+      - "8000:8000"
+    env_file:
+      - backend/regmodel/.env
+    environment:
+      - MLFLOW_TRACKING_URI=http://mlflow:5000
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp.json
+      - MODEL_ENV=dev  # Which environment models to load: "dev" or "prod"
+      - MODEL_TEST_MODE=false  # Which test_mode models to load: "true" or "false"
+      - MODEL_SUMMARY_PATH=gs://df_traffic_cyclist1/models/summary.json  # Path to model registry summary
+    volumes:
+      - ./backend/regmodel/app:/app/app  # Mount only app code for hot reload
+      - ./mlflow-trainer.json:/app/gcp.json:ro
+      # Mount only essential CSV files (exclude 2.8GB of unused raw data)
+      - ./data/train_baseline.csv:/app/data/train_baseline.csv:ro
+      - ./data/test_baseline.csv:/app/data/test_baseline.csv:ro
+      - ./data/test_sample.csv:/app/data/test_sample.csv:ro
+      - ./data/reference_data.csv:/app/data/reference_data.csv:ro
+      - ./data/reference_data_sample.csv:/app/data/reference_data_sample.csv:ro
+      - ./data/current_data.csv:/app/data/current_data.csv:ro
+    depends_on:
+      - mlflow
+    deploy:
+      resources:
+        limits:
+          memory: 6G  # Increased for train_baseline.csv (724K rows)
+        reservations:
+          memory: 2G
+    command: ["/app/.venv/bin/uvicorn", "app.fastapi_app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  # ========================================
+  # ClassModel API (Legacy - kept for reference)
+  # ========================================
   classmodel-backend:
     build:
       context: backend/classmodel
       dockerfile: Dockerfile
+    container_name: classmodel-api
     ports:
       - "8080:8080"
     env_file:
@@ -12,17 +98,298 @@ services:
     volumes:
       - ./backend/classmodel:/app
       - ./backend/classmodel/gcp.json:/tmp/gcp_creds.json:ro
-
     command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080"]
+    profiles:
+      - legacy  # Only starts with: docker compose --profile legacy up
 
-  regmodel-backend:
-    build:
-      context: backend/regmodel
-      dockerfile: Dockerfile
-    ports:
-      - "8000:8000"
-    env_file:
-      - backend/regmodel/.env
+  # ========================================
+  # Airflow Orchestration Platform
+  # ========================================
+  x-airflow-common: &airflow-common
+    image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.10.0-python3.12}
+    environment: &airflow-common-env
+      AIRFLOW__CORE__EXECUTOR: CeleryExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow
+      AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres-airflow/airflow  # Kept for entrypoint compatibility
+      AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres-airflow/airflow
+      AIRFLOW__CELERY__BROKER_URL: redis://:@redis-airflow:6379/0
+      AIRFLOW__CORE__FERNET_KEY: ""
+      AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "true"
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__API__AUTH_BACKEND: "airflow.api.auth.backend.basic_auth"
+      AIRFLOW__WEBSERVER__EXPOSE_CONFIG: "true"
+      # Environment variables from .env.airflow
+      ENV: ${ENV:-DEV}
+      GOOGLE_CLOUD_PROJECT: ${GOOGLE_CLOUD_PROJECT:-datascientest-460618}
+      GOOGLE_APPLICATION_CREDENTIALS: /opt/airflow/gcp.json
+      BQ_PROJECT: ${BQ_PROJECT:-datascientest-460618}
+      BQ_RAW_DATASET: ${BQ_RAW_DATASET:-bike_traffic_raw}
+      BQ_PREDICT_DATASET: ${BQ_PREDICT_DATASET:-bike_traffic_predictions}
+      BQ_LOCATION: ${BQ_LOCATION:-europe-west1}
+      GCS_BUCKET: ${GCS_BUCKET:-df_traffic_cyclist1}
+      API_URL_DEV: ${API_URL_DEV}
+      API_KEY_SECRET: ${API_KEY_SECRET:-dev-key-unsafe}
+      # Additional Python packages
+      _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:- pandas scikit-learn requests google-cloud-bigquery google-cloud-storage gcsfs db-dtypes}
     volumes:
-      - ./backend/regmodel:/app
-    command: ["uvicorn", "app.fastapi_app:app", "--host", "0.0.0.0", "--port", "8000"]
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
+      - ./gcp.json:/opt/airflow/gcp.json:ro
+      - ./data:/opt/airflow/data:ro
+      - ./shared_data:/app/shared_data  # Shared data between DAGs (dev only, prod uses GCS)
+      - ./models:/app/models  # Model artifacts (dev only, prod uses GCS)
+    user: "${AIRFLOW_UID:-50000}:${AIRFLOW_GID:-50000}"
+    depends_on:
+      - postgres-airflow
+      - redis-airflow
+  postgres-airflow:
+    image: postgres:15-alpine
+    container_name: postgres-airflow
+    environment:
+      POSTGRES_USER: airflow
+      POSTGRES_PASSWORD: airflow
+      POSTGRES_DB: airflow
+    volumes:
+      - postgres_airflow_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "airflow"]
+      interval: 5s
+      retries: 5
+    restart: always
+
+  redis-airflow:
+    image: redis:latest
+    container_name: redis-airflow
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 30s
+      retries: 50
+    restart: always
+
+  airflow-webserver:
+    <<: *airflow-common
+    container_name: airflow-webserver
+    command: webserver
+    environment:
+      <<: *airflow-common-env
+      DISCORD_WEBHOOK_URL: ${DISCORD_WEBHOOK_URL}
+      _AIRFLOW_DB_MIGRATE: "false"
+    env_file:
+      - .env
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      redis-airflow:
+        condition: service_healthy
+      airflow-init:
+        condition: service_healthy
+      mlflow:
+        condition: service_started
+      regmodel-backend:
+        condition: service_started
+    restart: always
+
+  airflow-scheduler:
+    <<: *airflow-common
+    container_name: airflow-scheduler
+    command: scheduler
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: "false"
+    env_file:
+      - .env
+    depends_on:
+      airflow-init:
+        condition: service_healthy
+      airflow-webserver:
+        condition: service_started
+    restart: always
+
+  airflow-worker:
+    <<: *airflow-common
+    container_name: airflow-worker
+    command: celery worker
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: "false"
+    env_file:
+      - .env
+    depends_on:
+      airflow-init:
+        condition: service_healthy
+      airflow-webserver:
+        condition: service_started
+    restart: always
+
+  airflow-init:
+    <<: *airflow-common
+    container_name: airflow-init
+    entrypoint: /bin/bash
+    command:
+      - -c
+      - |
+        function wait_for_postgres() {
+          echo "Waiting for postgres to be ready..."
+          while ! nc -z postgres-airflow 5432; do
+            sleep 1
+          done
+          echo "Postgres is ready!"
+        }
+
+        wait_for_postgres
+
+        if [[ -z "$${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN:-}" ]]; then
+          echo "ERROR: AIRFLOW__DATABASE__SQL_ALCHEMY_CONN is not set!"
+          exit 1
+        fi
+
+        echo "Initializing Airflow database..."
+        airflow db init
+
+        echo "Upgrading Airflow database..."
+        airflow db upgrade
+
+        echo "Creating admin user..."
+        airflow users create \
+          --username "$${_AIRFLOW_WWW_USER_USERNAME}" \
+          --firstname "Admin" \
+          --lastname "User" \
+          --role "Admin" \
+          --email "admin@example.com" \
+          --password "$${_AIRFLOW_WWW_USER_PASSWORD}" || echo "User already exists"
+
+        echo "Airflow initialization complete!"
+
+        # Keep container alive for healthcheck
+        while true; do
+          echo "Airflow DB is ready and initialized" > /tmp/airflow-init-status
+          sleep 5
+        done
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-admin}
+      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-admin}
+    healthcheck:
+      test: ["CMD", "test", "-f", "/tmp/airflow-init-status"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    depends_on:
+      postgres-airflow:
+        condition: service_healthy
+      redis-airflow:
+        condition: service_healthy
+
+  flower:
+    <<: *airflow-common
+    container_name: flower
+    command: flower  # Airflow 2.10.0 removed 'celery' prefix
+    environment:
+      <<: *airflow-common-env
+      _AIRFLOW_DB_MIGRATE: "false"
+    ports:
+      - "5555:5555"
+    depends_on:
+      airflow-init:
+        condition: service_healthy
+      airflow-webserver:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:5555/"]
+      interval: 10s
+      timeout: 10s
+      retries: 5
+    restart: always
+
+  # ========================================
+  # Prometheus (Monitoring)
+  # ========================================
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=15d'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-admin-api'
+    restart: always
+    profiles:
+      - monitoring  # Only starts with: docker compose --profile monitoring up
+
+  # ========================================
+  # Prometheus Pushgateway (for testing alerts)
+  # ========================================
+  pushgateway:
+    image: prom/pushgateway:latest
+    container_name: pushgateway
+    ports:
+      - "9091:9091"
+    restart: always
+    profiles:
+      - monitoring
+
+  # ========================================
+  # Grafana (Dashboards)
+  # ========================================
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GF_SECURITY_ADMIN_PASSWORD}
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    depends_on:
+      - prometheus
+    restart: always
+    profiles:
+      - monitoring  # Only starts with: docker compose --profile monitoring up
+
+  # ========================================
+  # Airflow Prometheus Exporter (Custom)
+  # ========================================
+  airflow-exporter:
+    build:
+      context: monitoring/custom_exporters
+      dockerfile: Dockerfile
+    container_name: airflow-exporter
+    ports:
+      - "9101:9101"
+    environment:
+      - AIRFLOW_BASE_URL=http://airflow-webserver:8080
+      - AIRFLOW_USERNAME=${_AIRFLOW_WWW_USER_USERNAME:-admin}
+      - AIRFLOW_PASSWORD=${_AIRFLOW_WWW_USER_PASSWORD:-admin}
+      - PYTHONUNBUFFERED=1  # Disable Python output buffering
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp.json
+      - GOOGLE_CLOUD_PROJECT=${GOOGLE_CLOUD_PROJECT}
+    volumes:
+      - ./gcp.json:/app/gcp.json:ro
+    depends_on:
+      - airflow-webserver
+    restart: always
+    profiles:
+      - monitoring  # Only starts with: docker compose --profile monitoring up
+
+volumes:
+  postgres_airflow_data:
+  prometheus_data:
+  grafana_data:

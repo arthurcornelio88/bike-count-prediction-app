@@ -1,139 +1,123 @@
-# 🧭 Documentation — Architecture MLFlow & Registry pour Bike Traffic
+# MLflow & Model Registry Architecture
 
-## 📌 Vue d’ensemble
-
-Ce projet prédit le **comptage horaire de vélos à Paris** à partir de données brutes issues des capteurs. Il inclut :
-
-* **3 modèles ML** : Random Forest (régression), Neural Net (régression), RF Classifier (classification binaire)
-* Un pipeline de traitement + entraînement + sauvegarde des artefacts
-* Un suivi de modèles via **MLflow** (local/dev ou GCS/prod)
-* Une application **Streamlit** connectée à un registre de modèles `summary.json` dans GCS
+**Last Updated**: 2025-11-05
 
 ---
 
-## 🏗️ 1. Pipelines de traitement
+## Overview
 
-### ✔️ Nettoyage commun à tous :
+This project predicts **hourly bike counts in Paris** from raw sensor data. It includes:
 
-* Classe `RawCleanerTransformer`
+* **3 ML models**: Random Forest (regression), Neural Net (regression), RF Classifier (binary classification)
+* A processing + training + artifact storage pipeline
+* Model tracking via **MLflow** (local/dev or GCS/prod)
+* A **Streamlit** application connected to a model registry (`summary.json`) in GCS
 
-  * Standardise les noms de colonnes
-  * Extrait des features temporelles (`jour`, `heure`, etc.)
-  * Parse les coordonnées géographiques
-  * Encode les jours de semaine
-  * Nettoie `nom_du_compteur`
+---
 
-### ✔️ Modèles spécifiques :
+## Processing Pipelines
+
+### Common Cleaning
+
+* Class `RawCleanerTransformer`
+  * Standardizes column names
+  * Extracts temporal features (`day`, `hour`, etc.)
+  * Parses geographic coordinates
+  * Encodes days of the week
+  * Cleans `nom_du_compteur`
+
+### Model-Specific Pipelines
 
 | Pipeline                      | Type                   | Architecture                                                        |
 | ----------------------------- | ---------------------- | ------------------------------------------------------------------- |
-| `RFPipeline`                  | Régression             | sklearn `RandomForestRegressor` + preprocessing `ColumnTransformer` |
-| `NNPipeline`                  | Régression             | Keras NN avec embedding + features scalés                           |
-| `AffluenceClassifierPipeline` | Classification binaire | sklearn `RandomForestClassifier` + stratified split                 |
+| `RFPipeline`                  | Regression             | sklearn `RandomForestRegressor` + preprocessing `ColumnTransformer` |
+| `NNPipeline`                  | Regression             | Keras NN with embedding + scaled features                           |
+| `AffluenceClassifierPipeline` | Binary Classification  | sklearn `RandomForestClassifier` + stratified split                 |
 
 ---
 
-## 🧪 2. Entraînement (`train.py`)
+## Training (`train.py`)
 
-### 🎛️ Mode `dev` vs `prod`
+### `dev` vs `prod` Mode
 
-| Mode   | Données                      | MLflow Tracking                               | Artefacts                                                      |
+| Mode   | Data                         | MLflow Tracking                               | Artifacts                                                      |
 | ------ | ---------------------------- | --------------------------------------------- | -------------------------------------------------------------- |
-| `dev`  | CSV local (`./data/`)        | `http://127.0.0.1:5000` local + `mlruns_dev/` | Sauvegarde locale dans `./models/`                             |
-| `prod` | Données sur GCS (`gs://...`) | Même MLflow, mais artefacts = GCS             | Export modèle + résumé dans `gs://df_traffic_cyclist1/models/` |
+| `dev`  | Local CSV (`./data/`)        | `http://127.0.0.1:5000` local + `mlruns_dev/` | Local storage in `./models/`                                   |
+| `prod` | Data on GCS (`gs://...`)     | Same MLflow, but artifacts = GCS              | Export model + summary to `gs://df_traffic_cyclist1/models/`   |
 
-### 📦 Entraînement complet via :
+### Full Training
 
 ```bash
 python src/train.py --env prod
 ```
 
-* Enregistre chaque run dans MLflow
-* Sauvegarde les modèles dans `tmp_*`
-* Upload dans `gs://df_traffic_cyclist1/models/{model_type}/{timestamp}/`
-* Met à jour le registre `summary.json`
+* Records each run in MLflow
+* Saves models in `tmp_*`
+* Uploads to `gs://df_traffic_cyclist1/models/{model_type}/{timestamp}/`
+* Updates `summary.json` registry
 
-<img src="img/1.png" alt="Artifacts in prod" width="600" />
+### MLflow Tracking: `mlruns` Local vs GCP
 
+The `mlruns/` directory is the **backbone of MLflow tracking**. It contains:
 
-### 2.5 🗄️ MLflow Tracking : `mlruns` en local vs GCP
+* Training **metadata** (hyperparameters, metrics, tags…)
+* Recorded **artifacts** (`.joblib`, `.keras` models, images, logs…)
 
-Le dossier `mlruns/` est la **colonne vertébrale du suivi MLflow**. Il contient :
+The project distinguishes two well-isolated environments:
 
-* les **métadonnées des entraînements** (hyperparamètres, métriques, tags…)
-* les **artefacts enregistrés** (modèles `.joblib`, `.keras`, images, logs…)
+#### 🧪 `dev` Environment
 
-Le projet distingue deux environnements bien isolés :
-
----
-
-#### 🧪 Environnement `dev`
-
-* **Backend Store (local)** :
-
-  * Tous les runs sont sauvegardés dans le dossier local :
-
-    ```
+* **Backend Store (local)**:
+  * All runs saved in local directory:
+    ```text
     ./mlruns_dev/
     └── <experiment_id>/
         └── <run_id>/
             └── meta.yaml, params/, metrics/
     ```
 
-* **Artifact Store (local aussi)** :
-
-  * Les artefacts générés (modèles, logs) sont stockés dans :
-
-    ```
+* **Artifact Store (local too)**:
+  * Generated artifacts (models, logs) stored in:
+    ```text
     ./mlruns_dev/<experiment_id>/<run_id>/artifacts/
     ```
 
-💡 Ce mode permet de travailler en local sans dépendre du cloud.
+💡 This mode allows local work without cloud dependency.
 
----
+#### ☁️ `prod` Environment
 
-#### ☁️ Environnement `prod`
-
-* **Backend Store (local)** :
-
-  * Les métadonnées sont toujours stockées localement :
-
-    ```
+* **Backend Store (local)**:
+  * Metadata still stored locally:
+    ```text
     ./mlruns_prod/
     ```
 
-* **Artifact Store (cloud - GCS)** :
-
-  * Les fichiers artefacts sont stockés dans :
-
-    ```
+* **Artifact Store (cloud - GCS)**:
+  * Artifact files stored in:
+    ```text
     gs://df_traffic_cyclist1/mlruns/<experiment_id>/<run_id>/artifacts/
     ```
 
-    <img src="img/2.png" alt="Artifacts in prod" width="600" />
+🎯 Advantage: models and logs are accessible in the cloud, but we keep a local history of all trainings.
 
-🎯 Avantage : les modèles et logs sont accessibles dans le cloud, mais on garde un historique local de tous les entraînements.
+### Visualization in MLflow
 
----
+Whether in `dev` or `prod`, experiments appear in **the same MLflow UI interface**, for example:
 
-### 🔍 Visualisation dans MLflow
-
-Qu'on soit en `dev` ou `prod`, les expériences apparaissent dans **la même interface MLflow UI**, par exemple :
-
-```
+```text
 http://127.0.0.1:5000/#/experiments/0
 ```
 
-La différence se fait dans le **chemin d’accès aux artefacts** affiché :
+The difference is in the **artifact access path** displayed:
 
-* `file:///.../mlruns_dev/...` pour `dev`
-* `gs://.../mlruns/...` pour `prod`
+* `file:///.../mlruns_dev/...` for `dev`
+* `gs://.../mlruns/...` for `prod`
 
 ---
 
-## 📚 3. Registre de modèles (`summary.json`)
+## Model Registry (`summary.json`)
 
-### Format :
+### Format
 
 ```json
 {
@@ -144,13 +128,14 @@ La différence se fait dans le **chemin d’accès aux artefacts** affiché :
   "run_id": "abcd...",
   "r2": 0.71,
   "rmse": 54.9,
-  "model_uri": "gs://df_traffic_cyclist1/models/nn/20250619_005924/"
+  "model_uri": "gs://df_traffic_cyclist1/models/nn/20250619_005924/",
+  "is_champion": false
 }
 ```
 
-🧠 C’est un historique **append-only** qui stocke tous les modèles entraînés en `prod`.
+🧠 This is an **append-only** history that stores all models trained in `prod`.
 
-### ✨ Géré automatiquement par :
+### Automatically Managed
 
 ```python
 update_summary(...)
@@ -158,15 +143,16 @@ update_summary(...)
 
 ---
 
-## 🔎 4. Sélection dynamique des modèles
+## Dynamic Model Selection
 
-L'application Streamlit (et n’importe quel consumer) peut charger le **meilleur modèle** en fonction :
+The Streamlit application (and any consumer) can load the **best model** based on:
 
-* du `model_type` (`rf`, `nn`, `rf_class`)
-* du `metric` (`r2`, `f1_score`, etc.)
-* de l’`env` et du `test_mode`
+* `model_type` (`rf`, `nn`, `rf_class`)
+* `metric` (`r2`, `f1_score`, etc.)
+* `env` and `test_mode`
+* Champion flag (`is_champion=True`)
 
-### Chargement via :
+### Loading Example
 
 ```python
 from app.model_registry_summary import get_best_model_from_summary
@@ -180,29 +166,54 @@ pipeline = get_best_model_from_summary(
 )
 ```
 
-💡 Il télécharge les artefacts depuis GCS dans `/tmp/`, détecte automatiquement les bons sous-dossiers (`rf/`, `nn/`, etc.), et recharge le bon modèle via `.load()`.
+💡 It downloads artifacts from GCS to `/tmp/`, automatically detects the right
+subdirectories (`rf/`, `nn/`, etc.), and reloads the right model via `.load()`.
 
 ---
 
-## 🎛️ 5. Application Streamlit
+## Streamlit Application
 
-### ✅ Fonctionnalités :
+### Features
 
-* Choix entre `Random Forest`, `Neural Net`, `RF Classifier (Affluence)`
-* Mode prédiction manuelle ou batch CSV
-* Téléchargement du fichier de prédiction
-* Chargement des modèles en cache depuis `summary.json`
+* Choice between `Random Forest`, `Neural Net`, `RF Classifier (Affluence)`
+* Manual prediction mode or batch CSV
+* Download prediction file
+* Cached model loading from `summary.json`
 
-### 🔒 Sécurité :
+### Security
 
-* Les credentials GCP sont automatiquement injectés depuis `st.secrets` ou une variable d’environnement
+* GCP credentials are automatically injected from `st.secrets` or environment variable
 
 ---
 
-## 🧠 Design Patterns clés
+## Key Design Patterns
 
-* **`summary.json` comme registre statique et décentralisé**
-* **Logging append-only** → traçabilité historique
-* **Chargement dynamique du “best model”** basé sur des métriques
-* **Séparation claire des modes `dev` et `prod`**
-* **Upload vers GCS + MLflow tracking = audit complet**
+* **`summary.json` as static and decentralized registry**
+* **Append-only logging** → historical traceability
+* **Dynamic "best model" loading** based on metrics
+* **Clear separation of `dev` and `prod` modes**
+* **Upload to GCS + MLflow tracking = complete audit**
+
+---
+
+## Champion Model System
+
+**Status**: Implemented (Phase 5)
+
+The system now supports explicit champion model designation:
+
+* **Champion promotion**: Models can be explicitly promoted to champion status via `/promote_champion` endpoint
+* **Priority loading**: Champion models (`is_champion=True`) are loaded first, regardless of metric scores
+* **Metadata caching**: Champion status and model metadata are cached in FastAPI for quick access
+* **Audit trail**: All promotions logged to BigQuery and Discord notifications
+
+See [training_strategy.md](./training_strategy.md) for complete training and deployment workflow.
+
+---
+
+**Related Documentation:**
+
+- [training_strategy.md](./training_strategy.md) — Complete training workflow
+- [mlflow_cloudsql.md](./mlflow_cloudsql.md) — MLflow setup and troubleshooting
+- [dags.md](./dags.md) — Airflow DAG documentation
+- [MLOPS_ROADMAP.md](../MLOPS_ROADMAP.md) — Overall MLOps architecture

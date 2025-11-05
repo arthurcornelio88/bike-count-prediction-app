@@ -1,0 +1,49 @@
+# Grafana Notification Policies Auto-provisioning
+# Route Prometheus alerts to Discord webhook
+
+apiVersion: 1
+
+policies:
+  - orgId: 1
+    receiver: discord-mlops
+    group_by:
+      - alertname
+      - severity
+      - component
+    group_wait: 10s
+    group_interval: 5m
+    repeat_interval: 4h
+    routes:
+      # Critical infrastructure alerts - immediate notification
+      - receiver: discord-mlops
+        matchers:
+          - severity = critical
+          - component = infrastructure
+        group_wait: 10s
+        repeat_interval: 1h
+        continue: false
+
+      # Critical model performance - immediate notification
+      - receiver: discord-mlops
+        matchers:
+          - severity = critical
+          - component = model
+        group_wait: 10s
+        repeat_interval: 2h
+        continue: false
+
+      # Warning alerts - less frequent
+      - receiver: discord-mlops
+        matchers:
+          - severity = warning
+        group_wait: 30s
+        repeat_interval: 4h
+        continue: false
+
+      # Info alerts - batched
+      - receiver: discord-mlops
+        matchers:
+          - severity = info
+        group_wait: 1m
+        repeat_interval: 12h
+        continue: false

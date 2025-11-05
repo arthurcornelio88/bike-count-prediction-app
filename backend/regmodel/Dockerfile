@@ -1,24 +1,33 @@
-FROM python:3.11-slim AS builder
+# ===== Builder stage with UV =====
+# Multi-platform compatible: supports both linux/amd64 and linux/arm64
+FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS builder
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends build-essential
+# Copy dependency files
+COPY pyproject.toml ./
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --target=/install -r requirements.txt
+# Install dependencies using UV (faster than pip)
+RUN uv venv /app/.venv && \
+    uv pip install --python /app/.venv/bin/python -r pyproject.toml
 
-# Nettoyage immédiat pour pas gonfler l'image intermédiaire
-RUN apt-get purge -y build-essential && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
-
-# Final image
+# ===== Final runtime image =====
 FROM python:3.11-slim
 
 WORKDIR /app
 
-COPY --from=builder /install /usr/local/lib/python3.11/site-packages/
-ENV PATH="/usr/local/lib/python3.11/site-packages/bin:$PATH"
+# Install UV in final image for runtime package management
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 
+# Copy virtual environment from builder
+COPY --from=builder /app/.venv /app/.venv
+
+# Copy application code
 COPY . .
+
+# Activate venv and set Python path
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app:$PYTHONPATH"
 
 EXPOSE 8000
 
