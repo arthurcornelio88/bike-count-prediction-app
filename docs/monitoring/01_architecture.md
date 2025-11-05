@@ -79,11 +79,12 @@ curl http://localhost:9090/api/v1/targets | jq '.data.activeTargets[] | {job: .l
          │
 ┌────────▼──────────────────────────────────────────────────┐
 │                    PROMETHEUS TSDB                        │
-│  • bike_model_r2_production                               │
+│  • bike_model_r2_champion_current                         │
+│  • bike_model_r2_champion_baseline                        │
 │  • bike_model_rmse_production                             │
 │  • bike_drift_share                                       │
 │  • fastapi_requests_total                                 │
-│  • ... (19 total metrics)                                 │
+│  • ... (22 total metrics)                                 │
 └────────┬──────────────────────────────────────────────────┘
          │
          │ Queries metrics every 10-30s

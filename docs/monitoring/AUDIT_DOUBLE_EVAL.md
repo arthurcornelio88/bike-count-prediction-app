@@ -1,8 +1,13 @@
 # Audit Urgent: Double Evaluation Metrics
 
 **Date**: 2025-11-04
-**Status**: 🔴 CRITICAL - Métriques manquantes
+**Status**: ✅ RESOLVED (see IMPLEMENTATION_DOUBLE_EVAL.md)
 **Impact**: Monitoring incomplet, comparaisons trompeuses
+
+> **Note**: This is a historical audit document. The issues described here have been resolved.
+> All references to `bike_model_r2_production` have been replaced with the 4-metric system:
+> - `bike_model_r2_champion_current` / `bike_model_r2_champion_baseline`
+> - `bike_model_r2_challenger_current` / `bike_model_r2_challenger_baseline`
 
 ---
 

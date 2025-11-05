@@ -13,10 +13,10 @@ PUSHGATEWAY_URL = "localhost:9091"
 
 
 def push_metrics(registry):
-    """Push metrics to Prometheus Pushgateway with airflow-metrics job name"""
-    # Use the SAME job name as the real airflow-exporter to override real metrics
-    job_name = "airflow-metrics"
-    grouping_key = {"instance": "airflow-exporter:9101"}
+    """Push metrics to Prometheus Pushgateway with test job name"""
+    # Use different job name to avoid conflict with real airflow-exporter
+    job_name = "test-metrics"
+    grouping_key = {"instance": "pushgateway-test:9091"}
 
     try:
         push_to_gateway(
@@ -142,6 +142,7 @@ def test_dashboards():
 
     # Drift metrics
     Gauge("bike_drift_detected", "Mock drift detected", registry=registry).set(1)
+    Gauge("bike_drift_share", "Mock drift share", registry=registry).set(0.35)
     Gauge(
         "bike_drifted_features_count", "Mock drifted features", registry=registry
     ).set(8)
@@ -172,6 +173,17 @@ def test_dashboards():
         "bike_predictions_generated_total", "Mock predictions", registry=registry
     ).set(450)
 
+    # Overview dashboard metrics
+    Gauge(
+        "bike_records_ingested_total", "Mock ingested records", registry=registry
+    ).set(1250)
+    Gauge(
+        "bike_model_r2_champion_current", "Mock champion R² current", registry=registry
+    ).set(0.89)
+    Gauge("bike_model_rmse_production", "Mock production RMSE", registry=registry).set(
+        45.2
+    )
+
     # Double eval metrics
     Gauge(
         "bike_model_r2_champion_baseline",
@@ -190,26 +202,28 @@ def test_dashboards():
     ).set(0.88)
 
     push_metrics(registry)
-    print("   Injected: 11 dashboard-only metrics")
+    print("   Injected: 15 dashboard metrics")
     print("   Expected: Visual updates in Grafana dashboards (no alerts)")
 
 
 def restore_normal():
-    """Restore all metrics to normal values"""
-    print("\n🔄 Restoring normal values...")
-    registry = CollectorRegistry()
+    """Delete all injected metrics from Pushgateway"""
+    print("\n🔄 Deleting all injected metrics from Pushgateway...")
+    import requests
 
-    # Normal values
-    Gauge("bike_drift_share", "Drift share", registry=registry).set(0.15)
-    Gauge("bike_model_r2_champion_current", "R² score", registry=registry).set(0.85)
-    Gauge("bike_model_rmse_production", "RMSE", registry=registry).set(45.0)
-    Gauge("fastapi_requests_total", "Total requests", registry=registry).set(1000)
-    Gauge("fastapi_errors_total", "Total errors", registry=registry).set(10)
-    Gauge("bike_records_ingested_total", "Ingested records", registry=registry).set(500)
-    Gauge("up", "Service status", registry=registry).set(1)
+    job_name = "test-metrics"
+    instance = "pushgateway-test:9091"
+    url = f"http://{PUSHGATEWAY_URL}/metrics/job/{job_name}/instance/{instance}"
 
-    push_metrics(registry)
-    print("✅ All metrics restored to normal values")
+    try:
+        response = requests.delete(url, timeout=30)
+        if response.status_code == 202:
+            print(f"✅ Deleted metrics for job={job_name}, instance={instance}")
+            print("   Real airflow-exporter metrics will resume in ~30s")
+        else:
+            print(f"⚠️  HTTP {response.status_code}: {response.text}")
+    except Exception as e:
+        print(f"❌ Failed to delete metrics: {e}")
 
 
 def main():
@@ -260,13 +274,14 @@ def main():
         "service": test_service_down,
         "dag": test_dag_too_slow,
         "dashboards": test_dashboards,
-        "restore": restore_normal,
     }
 
     if args.test == "all":
         for test_func in tests.values():
             test_func()
             time.sleep(args.wait)
+    elif args.test == "restore":
+        restore_normal()
     else:
         tests[args.test]()
 

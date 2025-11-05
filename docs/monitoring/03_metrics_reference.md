@@ -46,8 +46,11 @@
 
 | Metric Name | Type | Labels | Description | Used In |
 |-------------|------|--------|-------------|---------|
-| `bike_model_r2_production` | Gauge | - | Production model R² score | Dashboards ✅, Alerts ✅ |
-| `bike_model_rmse_production` | Gauge | - | Production model RMSE | Dashboards ✅, Alerts ✅ |
+| `bike_model_r2_champion_current` | Gauge | - | Champion R² on test_current | Dashboards ✅, Alerts ✅ |
+| `bike_model_r2_champion_baseline` | Gauge | - | Champion R² on test_baseline | Dashboards ✅ |
+| `bike_model_r2_challenger_current` | Gauge | - | Challenger R² on test_current | Dashboards ✅ |
+| `bike_model_r2_challenger_baseline` | Gauge | - | Challenger R² on test_baseline | Dashboards ✅ |
+| `bike_model_rmse_production` | Gauge | - | Champion RMSE (weekly validation) | Dashboards ✅, Alerts ✅ |
 | `bike_drift_detected` | Gauge | - | Drift flag (0/1) | Dashboards ✅ |
 | `bike_drift_share` | Gauge | - | Drift share (0.0-1.0) | Dashboards ✅, Alerts ✅ |
 | `bike_drifted_features_count` | Gauge | - | Number of drifted features | Dashboards ✅ |
@@ -82,7 +85,8 @@ They have been removed to eliminate confusion and redundancy:
 | `prediction_latency_seconds` | Never instrumented | Use `fastapi_request_duration_seconds` |
 | `training_runs_total` | Never instrumented | Use `bike_training_runs_total` |
 | `training_duration_seconds` | Never instrumented | Use `airflow_task_duration_seconds` |
-| `model_r2_score` | Never instrumented | Use `bike_model_r2_production` |
+| `model_r2_score` | Never instrumented | Use `bike_model_r2_champion_current` |
+| `bike_model_r2_production` | Removed (double-eval redesign) | Use `bike_model_r2_champion_current` |
 | `model_rmse` | Never instrumented | Use `bike_model_rmse_production` |
 | `drift_detected` | Never instrumented | Use `bike_drift_detected` |
 | `drift_share` | Never instrumented | Use `bike_drift_share` |
@@ -99,11 +103,11 @@ They have been removed to eliminate confusion and redundancy:
 
 | Rule ID | Metric(s) Used | Status |
 |---------|----------------|--------|
-| `model_performance_critical` | `bike_model_r2_production` | ✅ Active |
-| `model_performance_warning` | `bike_model_r2_production` | ✅ Active |
+| `model_performance_critical` | `bike_model_r2_champion_current` | ✅ Active |
+| `model_performance_warning` | `bike_model_r2_champion_current` | ✅ Active |
 | `model_rmse_high` | `bike_model_rmse_production` | ✅ Active (threshold 70) |
 | `high_drift_detected` | `bike_drift_share` | ✅ Active |
-| `critical_drift_with_performance` | `bike_drift_share`, `bike_model_r2_production` | ✅ Active |
+| `critical_drift_with_performance` | `bike_drift_share`, `bike_model_r2_champion_current` | ✅ Active |
 | `service_down` | `up` | ✅ Active |
 | `api_error_rate_high` | `fastapi_errors_total`, `fastapi_requests_total` | ✅ Active |
 | `airflow_dag_too_slow` | `airflow_dag_run_duration_seconds` | ✅ Active |
@@ -126,7 +130,7 @@ They have been removed to eliminate confusion and redundancy:
 | Dashboard | Metrics Used | Status |
 |-----------|--------------|--------|
 | `overview.json` | All `bike_*`, `fastapi_*`, `airflow_*` | ✅ Aligned |
-| `model_performance.json` | `bike_model_r2_production`, `bike_model_rmse_production` | ✅ Aligned |
+| `model_performance.json` | `bike_model_r2_champion_*`, `bike_model_r2_challenger_*`, `bike_model_rmse_production` | ✅ Aligned |
 | `drift_monitoring.json` | `bike_drift_*` | ✅ Aligned |
 | `training_deployment.json` | `bike_training_runs_total`, `bike_model_deployments_total` | ✅ Aligned |
 

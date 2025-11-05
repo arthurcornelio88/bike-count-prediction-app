@@ -597,6 +597,45 @@ def fine_tune_model(**context):
         context["ti"].xcom_push(key="run_id", value=result.get("run_id", "unknown"))
         context["ti"].xcom_push(key="error_message", value="")
 
+        # Promote champion if deployment decision is deploy
+        if "deploy" in decision:
+            print("\n🏆 Promoting new model to champion...")
+            promote_url = f"{ENV_CONFIG['API_URL']}/promote_champion"
+            promote_payload = {
+                "model_type": "rf",
+                "run_id": result.get("run_id", "unknown"),
+                "env": ENV_CONFIG["ENV"],
+                "test_mode": test_mode,
+            }
+
+            try:
+                promote_response = requests.post(
+                    promote_url, json=promote_payload, headers=headers, timeout=60
+                )
+
+                if promote_response.status_code == 200:
+                    print("✅ Model promoted to champion successfully")
+                    print(f"   Run ID: {result.get('run_id')}")
+                    print(f"   Decision: {decision}")
+                    context["ti"].xcom_push(key="champion_promoted", value=True)
+                else:
+                    print(
+                        f"⚠️ Champion promotion failed: {promote_response.status_code}"
+                    )
+                    print(f"   Response: {promote_response.text}")
+                    context["ti"].xcom_push(key="champion_promoted", value=False)
+                    context["ti"].xcom_push(
+                        key="promotion_error",
+                        value=f"{promote_response.status_code}: {promote_response.text}",
+                    )
+            except Exception as e:
+                print(f"⚠️ Champion promotion request failed: {e}")
+                context["ti"].xcom_push(key="champion_promoted", value=False)
+                context["ti"].xcom_push(key="promotion_error", value=str(e))
+        else:
+            print(f"\n⏭️  Skipping champion promotion (decision: {decision})")
+            context["ti"].xcom_push(key="champion_promoted", value=False)
+
         # Send Discord notification for training completion
         deployment_type = (
             "deploy"

@@ -73,6 +73,8 @@
 
 ## 📊 Alert Rules
 
+![Alerting](/docs/img/alerting_grafana.png)
+
 ### Configuration File
 
 **Location**: `monitoring/grafana/provisioning/alerting/rules.yml`
@@ -87,7 +89,7 @@
 
 - **UID**: `model_performance_critical`
 - **Severity**: CRITICAL
-- **Condition**: `bike_model_r2_production < 0.65` for 5 minutes
+- **Condition**: `bike_model_r2_champion_current < 0.65` for 5 minutes
 - **Action**: Immediate retraining required
 - **noDataState**: NoData (alert if metric missing)
 
@@ -95,7 +97,7 @@
 
 - **UID**: `model_performance_warning`
 - **Severity**: WARNING
-- **Condition**: `bike_model_r2_production < 0.70` (and >= 0.65) for 10 minutes
+- **Condition**: `bike_model_r2_champion_current < 0.70` (and >= 0.65) for 10 minutes
 - **Action**: Plan proactive retraining
 - **noDataState**: NoData
 
@@ -124,7 +126,7 @@
 
 - **UID**: `critical_drift_with_performance`
 - **Severity**: CRITICAL
-- **Condition**: `(bike_drift_share > 0.5) AND (bike_model_r2_production < 0.70)` for 5 minutes
+- **Condition**: `(bike_drift_share > 0.5) AND (bike_model_r2_champion_current < 0.70)` for 5 minutes
 - **Action**: Immediate proactive retraining needed
 - **noDataState**: **OK** (expression returns empty when condition false)
 
@@ -520,10 +522,10 @@ docker logs grafana 2>&1 | grep -i discord
 
 ```bash
 # Query Prometheus for the metric
-curl -s "http://localhost:9090/api/v1/query?query=bike_model_r2_production" | jq
+curl -s "http://localhost:9090/api/v1/query?query=bike_model_r2_champion_current" | jq
 
 # If empty result: metric not being scraped
-# Check: curl http://localhost:9101/metrics | grep bike_model_r2_production
+# Check: curl http://localhost:9101/metrics | grep bike_model_r2_champion
 ```
 
 #### Check 2: Alert Evaluation

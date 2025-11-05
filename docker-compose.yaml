@@ -316,6 +316,7 @@ services:
       - '--storage.tsdb.retention.time=15d'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
+      - '--web.enable-admin-api'
     restart: always
     profiles:
       - monitoring  # Only starts with: docker compose --profile monitoring up

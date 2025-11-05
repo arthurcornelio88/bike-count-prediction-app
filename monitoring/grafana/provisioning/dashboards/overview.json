@@ -77,7 +77,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "bike_drift_detected",
+          "expr": "bike_drift_detected{instance=\"$instance\"}",
           "refId": "A"
         }
       ],
@@ -145,7 +145,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "bike_drift_share * 100",
+          "expr": "bike_drift_share{instance=\"$instance\"} * 100",
           "refId": "A"
         }
       ],
@@ -213,7 +213,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "bike_model_r2_champion_current",
+          "expr": "bike_model_r2_champion_current{instance=\"$instance\"}",
           "refId": "A"
         }
       ],
@@ -554,7 +554,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "bike_records_ingested_total",
+          "expr": "bike_records_ingested_total{instance=\"$instance\"}",
           "refId": "A"
         }
       ],
@@ -613,7 +613,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "bike_predictions_generated_total",
+          "expr": "bike_predictions_generated_total{instance=\"$instance\"}",
           "refId": "A"
         }
       ],
@@ -672,7 +672,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "bike_drifted_features_count",
+          "expr": "bike_drifted_features_count{instance=\"$instance\"}",
           "refId": "A"
         }
       ],
@@ -732,7 +732,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "bike_model_rmse_production",
+          "expr": "bike_model_rmse_production{instance=\"$instance\"}",
           "refId": "A"
         }
       ],
@@ -745,7 +745,36 @@
   "style": "dark",
   "tags": ["mlops", "overview"],
   "templating": {
-    "list": []
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "Production",
+          "value": "airflow-exporter:9101"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Data Source",
+        "multi": false,
+        "name": "instance",
+        "options": [
+          {
+            "selected": true,
+            "text": "Production",
+            "value": "airflow-exporter:9101"
+          },
+          {
+            "selected": false,
+            "text": "Test (Pushgateway)",
+            "value": "pushgateway-test:9091"
+          }
+        ],
+        "query": "Production : airflow-exporter:9101, Test (Pushgateway) : pushgateway-test:9091",
+        "queryValue": "",
+        "skipUrlSync": false,
+        "type": "custom"
+      }
+    ]
   },
   "time": {
     "from": "now-6h",

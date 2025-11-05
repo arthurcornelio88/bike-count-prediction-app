@@ -8,6 +8,7 @@ from typing import List
 import pandas as pd
 
 from app.model_registry_summary import get_best_model_from_summary
+from app.model_registry_summary import promote_champion  # type: ignore[attr-defined]
 from app.middleware.prometheus_metrics import (
     PrometheusMiddleware,
     prometheus_response,
@@ -495,3 +496,85 @@ def monitor_endpoint(request: MonitorRequest):
         print(f"❌ Drift detection failed: {str(e)}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Drift detection failed: {str(e)}")
+
+
+# === Schéma de requête pour promotion de champion ===
+class PromoteChampionRequest(BaseModel):
+    model_type: str  # "rf", "nn", or "rf_class"
+    run_id: str  # MLflow run_id to promote
+    env: str = "prod"
+    test_mode: bool = False
+
+
+# === Endpoint de promotion de champion ===
+@app.post("/promote_champion")
+def promote_champion_endpoint(request: PromoteChampionRequest):
+    """
+    Promote a specific model to champion status.
+
+    This endpoint is called by dag_monitor_and_train.py when the deployment
+    decision is "deploy". It updates summary.json to mark the challenger model
+    as the new champion, which will be used by subsequent /predict calls.
+
+    The promotion logic:
+    1. Demotes any existing champion (is_champion=False) for the same model_type/env/test_mode
+    2. Promotes the specified run_id to champion (is_champion=True)
+    3. Saves updated summary.json to GCS
+
+    Example request:
+    {
+        "model_type": "rf",
+        "run_id": "abc123def456",
+        "env": "prod",
+        "test_mode": false
+    }
+
+    Returns:
+    {
+        "status": "success",
+        "message": "Model rf run_id=abc123def456 promoted to champion"
+    }
+    """
+    try:
+        summary_path = "gs://df_traffic_cyclist1/models/summary.json"
+
+        print(f"🏆 Promoting {request.model_type} run_id={request.run_id} to champion")
+        print(
+            f"   env={request.env}, test_mode={request.test_mode}, summary_path={summary_path}"
+        )
+
+        promote_champion(
+            summary_path=summary_path,
+            model_type=request.model_type,
+            run_id=request.run_id,
+            env=request.env,
+            test_mode=request.test_mode,
+        )
+
+        # Clear model cache to force reload of new champion on next /predict call
+        global model_cache
+        cache_key = (request.model_type, "r2")  # Assuming r2 is primary metric
+        if cache_key in model_cache:
+            print(f"🗑️  Clearing cache for {request.model_type} to reload new champion")
+            del model_cache[cache_key]
+
+            # Also clear the cache directory
+            cache_dir = get_cache_dir(request.model_type, "r2")
+            if os.path.exists(cache_dir):
+                shutil.rmtree(cache_dir)
+                print(f"🗑️  Cleared cache directory: {cache_dir}")
+
+        return {
+            "status": "success",
+            "message": f"Model {request.model_type} run_id={request.run_id} promoted to champion",
+        }
+
+    except ValueError as e:
+        print(f"❌ Promotion failed: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+
+        print(f"❌ Promotion failed: {str(e)}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Promotion failed: {str(e)}")

@@ -22,6 +22,7 @@ def update_summary(
     precision: float = None,
     recall: float = None,
     f1_score: float = None,
+    is_champion: bool = False,
 ):
     entry = {
         "timestamp": datetime.datetime.utcnow().isoformat(),
@@ -30,6 +31,7 @@ def update_summary(
         "test_mode": test_mode,
         "run_id": run_id,
         "model_uri": model_uri,
+        "is_champion": is_champion,
     }
 
     # Ajoute les métriques si elles sont fournies
@@ -107,6 +109,110 @@ def update_summary(
         print(f"✅ summary.json mis à jour localement : {summary_path}")
 
 
+def promote_champion(
+    summary_path: str,
+    model_type: str,
+    run_id: str,
+    env: str = "prod",
+    test_mode: bool = False,
+):
+    """
+    Promote a specific model to champion status.
+
+    This function:
+    1. Loads the existing summary.json from GCS or local
+    2. Demotes any existing champion (is_champion=False) for the same model_type/env/test_mode
+    3. Promotes the specified run_id to champion (is_champion=True)
+    4. Saves the updated summary back to GCS or local
+
+    Args:
+        summary_path: Path to summary.json (gs:// or local)
+        model_type: Type of model (rf, nn, rf_class)
+        run_id: MLflow run_id to promote
+        env: Environment (prod/dev)
+        test_mode: Test mode flag
+
+    Raises:
+        ValueError: If run_id not found in summary
+    """
+    # Déterminer le chemin local - utiliser tempfile.gettempdir() au lieu de hardcoded /tmp
+    summary_path_local = (
+        os.path.join(tempfile.gettempdir(), "summary.json")
+        if summary_path.startswith("gs://")
+        else summary_path
+    )
+    summary = []
+
+    # Télécharger ou charger si existant
+    if summary_path.startswith("gs://"):
+        try:
+            bucket_name, blob_path = summary_path.replace("gs://", "").split("/", 1)
+            client = storage.Client()
+            bucket = client.bucket(bucket_name)
+            blob = bucket.blob(blob_path)
+
+            if blob.exists():
+                summary_content = blob.download_as_text()
+                try:
+                    summary = json.loads(summary_content)
+                except json.JSONDecodeError:
+                    raise ValueError("⚠️ summary.json vide ou corrompu.")
+            else:
+                raise ValueError("⚠️ summary.json n'existe pas dans GCS")
+        except Exception as e:
+            raise ValueError(f"⚠️ Erreur lors du téléchargement de summary.json : {e}")
+    else:
+        # Local file
+        if os.path.exists(summary_path_local):
+            with open(summary_path_local, "r") as f:
+                try:
+                    summary = json.load(f)
+                except json.JSONDecodeError:
+                    raise ValueError("⚠️ summary.json vide ou corrompu.")
+        else:
+            raise ValueError(f"⚠️ summary.json n'existe pas : {summary_path_local}")
+
+    # Find the model to promote
+    found = False
+    for entry in summary:
+        if (
+            entry["model_type"] == model_type
+            and entry["env"] == env
+            and entry["test_mode"] == test_mode
+        ):
+            if entry["run_id"] == run_id:
+                entry["is_champion"] = True
+                found = True
+                print(f"✅ Promoted {model_type} run_id={run_id} to champion")
+            else:
+                # Demote other champions
+                if entry.get("is_champion", False):
+                    entry["is_champion"] = False
+                    print(f"⬇️ Demoted previous champion run_id={entry['run_id']}")
+
+    if not found:
+        raise ValueError(
+            f"❌ run_id={run_id} not found for model_type={model_type}, env={env}, test_mode={test_mode}"
+        )
+
+    # Save back
+    if summary_path.startswith("gs://"):
+        # Upload to GCS
+        bucket_name, blob_path = summary_path.replace("gs://", "").split("/", 1)
+        client = storage.Client()
+        bucket = client.bucket(bucket_name)
+        blob = bucket.blob(blob_path)
+        blob.upload_from_string(
+            json.dumps(summary, indent=2), content_type="application/json"
+        )
+        print(f"✅ Champion promotion saved to {summary_path}")
+    else:
+        # Save locally
+        with open(summary_path_local, "w") as f:
+            json.dump(summary, f, indent=2)
+        print(f"✅ Champion promotion saved locally : {summary_path}")
+
+
 # === Chargement du meilleur modèle depuis le résumé
 def get_best_model_from_summary(
     model_type: str,
@@ -143,17 +249,26 @@ def get_best_model_from_summary(
             f"Aucun modèle trouvé pour type={model_type}, env={env}, test_mode={test_mode}"
         )
 
-    metric_sorting = {
-        "rmse": lambda r: -r["rmse"],
-        "r2": lambda r: r["r2"],
-        "f1_score": lambda r: r.get("f1_score", -1),
-        "accuracy": lambda r: r.get("accuracy", -1),
-    }
+    # Step 2.1: Check for promoted champion (is_champion=True)
+    champions = [r for r in filtered if r.get("is_champion", False)]
 
-    if metric not in metric_sorting:
-        raise ValueError(f"Métrique non supportée : {metric}")
+    if champions:
+        print("🏆 Champion trouvé (is_champion=True), utilisation prioritaire")
+        best = champions[0]  # Should be only one, but take first if multiple
+    else:
+        # Fallback to metric-based selection
+        print(f"⚠️ Aucun champion promu, sélection par métrique {metric}")
+        metric_sorting = {
+            "rmse": lambda r: -r["rmse"],
+            "r2": lambda r: r["r2"],
+            "f1_score": lambda r: r.get("f1_score", -1),
+            "accuracy": lambda r: r.get("accuracy", -1),
+        }
 
-    best = max(filtered, key=metric_sorting[metric])
+        if metric not in metric_sorting:
+            raise ValueError(f"Métrique non supportée : {metric}")
+
+        best = max(filtered, key=metric_sorting[metric])
     print(f"🔍 Résumé sélectionné:\n{json.dumps(best, indent=2)}")
     print(f"⏳ Étape 3 – Téléchargement depuis GCS : {best['model_uri']}")
 

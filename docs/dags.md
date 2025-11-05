@@ -461,6 +461,7 @@ Invokes the FastAPI `/train` endpoint with `data_source="baseline"` and optional
 - Sliding-window strategy: combines baseline training data with fresh samples when schemas align
 - Double evaluation: champion vs new model on `test_baseline` + holdout current data
 - Writes result metrics, run ids, and deployment decision back to XCom for auditing
+- **Champion Promotion**: When decision="deploy", calls `/promote_champion` endpoint to update `summary.json`
 
 **Real Production Run Results (2025-11-03, force=true, test_mode=false)**:
 
@@ -482,6 +483,19 @@ Invokes the FastAPI `/train` endpoint with `data_source="baseline"` and optional
   - No baseline regression detected
   - Current distribution: +18.72% improvement
   - Baseline distribution: +50.70% improvement
+
+**Champion Promotion Flow**:
+
+When deployment decision contains "deploy", the DAG automatically promotes the new model:
+
+1. Calls `POST /promote_champion` with run_id, model_type, env
+2. FastAPI updates `summary.json` in GCS:
+   - Sets `is_champion=true` for new model
+   - Sets `is_champion=false` for previous champion
+3. Clears FastAPI model cache to force reload
+4. Next `/predict` call loads new champion via `get_best_model_from_summary()`
+
+This ensures `dag_daily_prediction` automatically uses the promoted model without manual intervention.
 
 ![fine_tune_model screenshot](/docs/img/dag3_finetuning2.png)
 
