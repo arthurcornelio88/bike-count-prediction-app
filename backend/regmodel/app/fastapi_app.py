@@ -291,13 +291,17 @@ def evaluate_endpoint(request: EvaluateRequest):
             # TODO: Implement MLflow model loading by URI
             # For now, use champion as fallback
             print("⚠️  model_uri not yet implemented, using champion")
-            model = get_cached_model(request.model_type, request.metric)
+            model, _ = get_cached_model(
+                request.model_type, request.metric
+            )  # Unpack tuple
             model_uri = "champion"  # Placeholder
         else:
             print(
                 f"🏆 Loading champion {request.model_type} model (metric={request.metric})"
             )
-            model = get_cached_model(request.model_type, request.metric)
+            model, _ = get_cached_model(
+                request.model_type, request.metric
+            )  # Unpack tuple
             model_uri = "champion"
 
         # Evaluate model
