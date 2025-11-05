@@ -130,7 +130,7 @@ services:
       API_URL_DEV: ${API_URL_DEV}
       API_KEY_SECRET: ${API_KEY_SECRET:-dev-key-unsafe}
       # Additional Python packages
-      _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:- pandas scikit-learn requests google-cloud-bigquery google-cloud-storage gcsfs db-dtypes}
+      _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:- pandas scikit-learn requests google-cloud-bigquery google-cloud-storage gcsfs db-dtypes redis<5.0.0}
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
