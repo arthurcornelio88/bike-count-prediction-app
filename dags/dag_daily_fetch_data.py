@@ -12,6 +12,7 @@ from google.cloud import bigquery
 
 from utils.env_config import get_env_config
 from utils.bike_helpers import create_bq_dataset_if_not_exists
+from utils.discord_alerts import send_ingestion_success
 
 
 # Configuration
@@ -154,6 +155,9 @@ def fetch_bike_data_to_bq(**context):
     context["ti"].xcom_push(key="records_count", value=len(df_clean))
     context["ti"].xcom_push(key="table_id", value=full_table_id)
     context["ti"].xcom_push(key="ingestion_date", value=today)
+
+    # Discord notification
+    send_ingestion_success(len(df_clean), table_id)
 
 
 def validate_ingestion(**context):
