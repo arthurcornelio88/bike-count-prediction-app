@@ -1,7 +1,31 @@
 """
-DAG 3: Monitoring + Fine-tuning
-Drift detection → Model validation → Conditional fine-tuning
-Runs weekly to assess model performance and retrain if needed
+DAG 3: Monitoring + Fine-tuning with Champion Promotion
+Drift detection → Model validation → Conditional fine-tuning → Champion validation
+
+Flow:
+1. monitor_drift: Detect data drift using Evidently
+2. validate_model: Validate current CHAMPION on production data (last 7 days)
+3. decide_fine_tune: Hybrid decision logic (reactive + proactive)
+   - Branch A: fine_tune_model → validate_new_champion → end_monitoring
+   - Branch B: end_monitoring (no training needed)
+4. fine_tune_model: Train CHALLENGER with double evaluation (baseline + current)
+   - If CHALLENGER beats CHAMPION: promote to new CHAMPION
+5. validate_new_champion: Re-validate NEW CHAMPION on production data
+   - CRITICAL: After promotion, we need fresh metrics for the new champion
+   - Without this, Grafana/Prometheus would show OLD champion's metrics
+   - Pushes metrics to XCom for end_monitoring to write to BigQuery
+6. end_monitoring: Write audit log with correct champion metrics
+   - Uses validate_new_champion metrics if promotion happened
+   - Uses validate_model metrics if no promotion
+
+Why validate_new_champion is necessary:
+- validate_model runs BEFORE training (validates old champion)
+- After promotion, BigQuery still has old champion's validation metrics
+- Prometheus/Grafana read from BigQuery → show stale metrics
+- validate_new_champion provides fresh metrics for the newly promoted model
+- This ensures monitoring dashboards reflect the current production model
+
+Runs weekly to assess model performance and retrain if needed.
 """
 
 from airflow import DAG
@@ -16,6 +40,13 @@ from utils.env_config import get_env_config
 from utils.bike_helpers import (
     create_monitoring_table_if_needed,
     get_reference_data_path,
+)
+from utils.discord_alerts import (
+    send_drift_alert,
+    send_performance_alert,
+    send_training_success,
+    send_training_failure,
+    send_champion_promotion_alert,
 )
 
 
@@ -43,7 +74,7 @@ def run_drift_monitoring(**context):
     # Load current data from BigQuery (last 7 days)
     query = f"""
     SELECT *
-    FROM `{ENV_CONFIG['BQ_PROJECT']}.{ENV_CONFIG['BQ_RAW_DATASET']}.comptage_velo`
+    FROM `{ENV_CONFIG["BQ_PROJECT"]}.{ENV_CONFIG["BQ_RAW_DATASET"]}.comptage_velo`
     WHERE date_et_heure_de_comptage >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
     LIMIT 1000
     """  # nosec B608
@@ -123,9 +154,43 @@ def validate_model(**context):
     """
     Compare predictions vs true labels from BigQuery
     Calculate RMSE and R² for model performance
+
+    NOTE: This validates the CHAMPION model currently in production.
+    Predictions in BigQuery were made by the champion (is_champion=True).
     """
     today = datetime.utcnow().strftime("%Y%m%d")
-    print(f"📊 Validating model performance for {today}")
+    print(f"📊 Validating CHAMPION model performance for {today}")
+
+    # First, identify which model is the current champion
+    try:
+        print("🔍 Identifying current champion model...")
+        api_url = f"{ENV_CONFIG['API_URL']}/model_summary"
+        headers = {}
+        api_key = ENV_CONFIG.get("API_KEY_SECRET")
+        if api_key and api_key != "dev-key-unsafe":
+            headers["X-API-Key"] = api_key
+
+        response = requests.get(api_url, headers=headers, timeout=30)
+        if response.status_code == 200:
+            summary = response.json()
+            champion_models = [m for m in summary if m.get("is_champion", False)]
+            if champion_models:
+                champion = champion_models[0]
+                print(
+                    f"🏆 Current champion: {champion.get('model_type')} (run_id: {champion.get('run_id', 'unknown')[:8]}...)"
+                )
+                print(
+                    f"   - env: {champion.get('env')}, test_mode: {champion.get('test_mode')}"
+                )
+                context["ti"].xcom_push(
+                    key="champion_run_id", value=champion.get("run_id", "unknown")
+                )
+            else:
+                print("⚠️ No champion model found in registry")
+        else:
+            print(f"⚠️ Failed to fetch model summary: {response.status_code}")
+    except Exception as e:
+        print(f"⚠️ Failed to identify champion model: {e}")
 
     client = bigquery.Client(project=ENV_CONFIG["BQ_PROJECT"])
 
@@ -137,7 +202,7 @@ def validate_model(**context):
             p.identifiant_du_compteur,
             PARSE_TIMESTAMP('%Y-%m-%d %H:%M:%S%Ez', p.date_et_heure_de_comptage) as date_et_heure_de_comptage,
             p.prediction_ts
-        FROM `{ENV_CONFIG['BQ_PROJECT']}.{ENV_CONFIG['BQ_PREDICT_DATASET']}.daily_*` p
+        FROM `{ENV_CONFIG["BQ_PROJECT"]}.{ENV_CONFIG["BQ_PREDICT_DATASET"]}.daily_*` p
         WHERE _TABLE_SUFFIX >= FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY))
     ),
     recent_actuals AS (
@@ -145,7 +210,7 @@ def validate_model(**context):
             r.comptage_horaire as true_value,
             r.identifiant_du_compteur,
             r.date_et_heure_de_comptage
-        FROM `{ENV_CONFIG['BQ_PROJECT']}.{ENV_CONFIG['BQ_RAW_DATASET']}.comptage_velo` r
+        FROM `{ENV_CONFIG["BQ_PROJECT"]}.{ENV_CONFIG["BQ_RAW_DATASET"]}.comptage_velo` r
         WHERE r.date_et_heure_de_comptage >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
     )
     SELECT
@@ -206,10 +271,15 @@ def decide_if_fine_tune(**context):
     4. OK: If low drift (<30%) and good metrics, no action needed
 
     This balances cost (avoiding unnecessary retraining) with performance (catching degradation early).
+
+    NOTE: Decision is based on CHAMPION model performance (validated in previous task).
     """
     drift = context["ti"].xcom_pull(task_ids="monitor_drift", key="drift_detected")
     r2 = context["ti"].xcom_pull(task_ids="validate_model", key="r2")
     rmse = context["ti"].xcom_pull(task_ids="validate_model", key="rmse")
+    champion_run_id = context["ti"].xcom_pull(
+        task_ids="validate_model", key="champion_run_id"
+    )
     drift_summary_str = context["ti"].xcom_pull(
         task_ids="monitor_drift", key="drift_summary"
     )
@@ -236,17 +306,22 @@ def decide_if_fine_tune(**context):
                 1.0 if drift else 0.0
             )  # Fallback: assume full drift if detected
 
-    # Thresholds
-    R2_CRITICAL = 0.65  # Below this → retrain immediately (reactive)
-    R2_WARNING = 0.70  # Below this + high drift → retrain proactively
-    RMSE_THRESHOLD = 60.0  # Above this → retrain immediately
+    # Thresholds (adjusted for production data distribution)
+    R2_CRITICAL = 0.45  # Below this → retrain immediately (reactive)
+    R2_WARNING = 0.55  # Below this + high drift → retrain proactively
+    RMSE_THRESHOLD = 90.0  # Above this → retrain immediately (was 60.0)
     DRIFT_CRITICAL = 0.5  # 50%+ drift share → critical
     DRIFT_WARNING = 0.3  # 30%+ drift share → warning
 
     print("\n🎯 Decision Logic (Hybrid Strategy):")
+    print(
+        f"   - Champion model: {champion_run_id[:8] if champion_run_id else 'unknown'}..."
+    )
     print(f"   - Drift detected: {drift} (drift share: {drift_share:.1%})")
-    print(f"   - R²: {r2:.4f} (critical: {R2_CRITICAL}, warning: {R2_WARNING})")
-    print(f"   - RMSE: {rmse:.2f} (threshold: {RMSE_THRESHOLD})")
+    print(
+        f"   - Champion R²: {r2:.4f} (critical: {R2_CRITICAL}, warning: {R2_WARNING})"
+    )
+    print(f"   - Champion RMSE: {rmse:.2f} (threshold: {RMSE_THRESHOLD})")
     print(f"   - Force fine-tune: {force_fine_tune}")
 
     # PRIORITY 0: Force flag overrides all logic (for testing)
@@ -266,6 +341,10 @@ def decide_if_fine_tune(**context):
         if drift:
             print(f"   → Drift also detected (drift share: {drift_share:.1%})")
         print("   → Action: Immediate retraining to restore performance")
+
+        # Send Discord alert for critical performance
+        send_performance_alert(r2, rmse, threshold=R2_WARNING)
+
         return "fine_tune_model"
 
     # PRIORITY 2: Critical drift + metrics declining → retrain preventively (PROACTIVE)
@@ -275,6 +354,13 @@ def decide_if_fine_tune(**context):
         print(f"   → R²: {r2:.4f} < {R2_WARNING} (declining, not critical yet)")
         print(f"   → Metrics still above critical ({R2_CRITICAL}) but trending down")
         print("   → Action: Proactive retraining to prevent further degradation")
+
+        # Send Discord alerts for drift and declining performance
+        send_drift_alert(
+            drift_share, r2, drifted_features=0
+        )  # features count from drift_summary if available
+        send_performance_alert(r2, rmse, threshold=R2_WARNING)
+
         return "fine_tune_model"
 
     # PRIORITY 3: Moderate-to-critical drift but metrics still good → monitor closely (WAIT)
@@ -288,6 +374,10 @@ def decide_if_fine_tune(**context):
             f"   → Will retrain if R² drops below {R2_WARNING} (proactive) or {R2_CRITICAL} (reactive)"
         )
         print("   → Action: Monitor closely, no retraining yet")
+
+        # Send drift alert (WARNING level) - no training needed yet
+        send_drift_alert(drift_share, r2, drifted_features=0)
+
         return "end_monitoring"
 
     # All good - no drift or low drift with good metrics
@@ -319,7 +409,7 @@ def fine_tune_model(**context):
     # Get fresh data from BigQuery (last 30 days for training)
     query = f"""
     SELECT *
-    FROM `{ENV_CONFIG['BQ_PROJECT']}.{ENV_CONFIG['BQ_RAW_DATASET']}.comptage_velo`
+    FROM `{ENV_CONFIG["BQ_PROJECT"]}.{ENV_CONFIG["BQ_RAW_DATASET"]}.comptage_velo`
     WHERE date_et_heure_de_comptage >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 30 DAY)
     LIMIT 2000
     """  # nosec B608
@@ -332,6 +422,26 @@ def fine_tune_model(**context):
 
     print(f"✅ Loaded {len(df_fresh)} samples for fine-tuning")
 
+    # Preprocess BigQuery data to align with train_baseline.csv format
+    print("🔧 Preprocessing BigQuery data for schema alignment...")
+
+    # 1. Drop ingestion_ts (not in baseline CSV)
+    if "ingestion_ts" in df_fresh.columns:
+        df_fresh = df_fresh.drop(columns=["ingestion_ts"])
+        print("   ✅ Dropped ingestion_ts")
+
+    # 2. Reconstruct coordonnées_géographiques from latitude/longitude
+    #    (RawCleanerTransformer expects this format for CSV compatibility)
+    if "latitude" in df_fresh.columns and "longitude" in df_fresh.columns:
+        df_fresh["coordonnées_géographiques"] = (
+            df_fresh["latitude"].astype(str) + "," + df_fresh["longitude"].astype(str)
+        )
+        # Drop latitude/longitude to avoid duplicate columns after normalization
+        df_fresh = df_fresh.drop(columns=["latitude", "longitude"])
+        print("   ✅ Reconstructed coordonnées_géographiques (dropped lat/lon)")
+
+    print(f"   📊 Preprocessed columns: {sorted(df_fresh.columns.tolist())}")
+
     # Clean data for JSON serialization (convert Timestamps to strings)
     for col in df_fresh.columns:
         if pd.api.types.is_datetime64_any_dtype(df_fresh[col]):
@@ -341,8 +451,15 @@ def fine_tune_model(**context):
 
     print("✅ Data cleaned for JSON serialization")
 
-    # Evaluate champion on test_baseline BEFORE training (for fair comparison)
-    print("\n📊 Evaluating current champion on test_baseline...")
+    # Get current champion info from validate_model task
+    old_champion_run_id = context["ti"].xcom_pull(
+        task_ids="validate_model", key="champion_run_id"
+    )
+
+    # Evaluate OLD CHAMPION on test_baseline BEFORE training (for fair comparison)
+    print(
+        f"\n📊 Evaluating OLD CHAMPION ({old_champion_run_id[:8] if old_champion_run_id else 'unknown'}...) on test_baseline..."
+    )
     evaluate_url = f"{ENV_CONFIG['API_URL']}/evaluate"
     evaluate_payload = {
         "model_type": "rf",
@@ -350,17 +467,19 @@ def fine_tune_model(**context):
         "test_baseline_path": "gs://df_traffic_cyclist1/raw_data/test_baseline.csv",
     }
 
-    champion_r2_baseline = None
+    old_champion_r2_baseline = None
     try:
-        eval_response = requests.post(evaluate_url, json=evaluate_payload, timeout=600)
+        eval_response = requests.post(evaluate_url, json=evaluate_payload, timeout=1200)
         if eval_response.status_code == 200:
             eval_result = eval_response.json()
-            champion_r2_baseline = eval_result["metrics"]["r2"]
-            print(f"✅ Champion R² on test_baseline: {champion_r2_baseline:.4f}")
+            old_champion_r2_baseline = eval_result["metrics"]["r2"]
+            print(
+                f"✅ OLD CHAMPION R² on test_baseline: {old_champion_r2_baseline:.4f}"
+            )
         else:
             print(f"⚠️  Baseline evaluation failed: {eval_response.status_code}")
     except Exception as e:
-        print(f"⚠️  Failed to evaluate champion on baseline: {e}")
+        print(f"⚠️  Failed to evaluate old champion on baseline: {e}")
 
     # Call /train endpoint with fine-tuning mode
     api_url = f"{ENV_CONFIG['API_URL']}/train"
@@ -383,6 +502,7 @@ def fine_tune_model(**context):
     if api_key and api_key != "dev-key-unsafe":
         headers["X-API-Key"] = api_key
 
+    print("\n🚀 Training CHALLENGER model...")
     print(f"🌐 Calling training API: {api_url}")
     print(
         f"📊 Training parameters: data_source=baseline, current_data={len(df_fresh)} samples, test_mode={test_mode}"
@@ -393,7 +513,7 @@ def fine_tune_model(**context):
             api_url,
             json=payload,
             headers=headers,
-            timeout=1200,  # 20 minutes timeout (baseline eval takes ~12 min)
+            timeout=1800,  # 30 minutes timeout (baseline eval takes ~12 min)
         )
 
         if response.status_code != 200:
@@ -408,7 +528,10 @@ def fine_tune_model(**context):
             return
 
         result = response.json()
-        print("✅ Fine-tuning completed successfully")
+        challenger_run_id = result.get("run_id", "unknown")
+        print(
+            f"✅ CHALLENGER model trained successfully (run_id: {challenger_run_id[:8]}...)"
+        )
         print(f"📊 Training result: {result}")
 
         # Check if double evaluation was enabled
@@ -441,29 +564,33 @@ def fine_tune_model(**context):
         r2_current = metrics_current.get("r2", 0.0)
         r2_train = metrics_train.get("r2", 0.0)
 
-        # Get current production model metrics (from validation task)
-        current_champion_r2 = context["ti"].xcom_pull(
+        # Get OLD CHAMPION metrics (from validation task)
+        old_champion_r2_current = context["ti"].xcom_pull(
             task_ids="validate_model", key="r2"
         )
-        # champion_r2_baseline already evaluated above (before training)
+        # old_champion_r2_baseline already evaluated above (before training)
 
         # Calculate improvements on both test sets
         r2_improvement_current = (
-            r2_current - current_champion_r2 if current_champion_r2 else 0.0
+            r2_current - old_champion_r2_current if old_champion_r2_current else 0.0
         )
         r2_improvement_baseline = None
-        if champion_r2_baseline is not None:
-            r2_improvement_baseline = r2_baseline - champion_r2_baseline
+        if old_champion_r2_baseline is not None:
+            r2_improvement_baseline = r2_baseline - old_champion_r2_baseline
 
         print("\n" + "=" * 60)
-        print("📊 DOUBLE EVALUATION RESULTS")
+        print("📊 DOUBLE EVALUATION RESULTS: CHALLENGER vs OLD CHAMPION")
         print("=" * 60)
-        print("📍 Baseline Test Set (fixed reference, 181K samples):")
-        print(f"   - New model R²: {r2_baseline:.4f}")
         print(
-            f"   - Champion R²: {champion_r2_baseline:.4f}"
-            if champion_r2_baseline
-            else "   - Champion R²: N/A"
+            f"🏆 OLD CHAMPION: {old_champion_run_id[:8] if old_champion_run_id else 'unknown'}..."
+        )
+        print(f"🆕 CHALLENGER: {challenger_run_id[:8]}...")
+        print("\n📍 Baseline Test Set (fixed reference, 181K samples):")
+        print(f"   - CHALLENGER R²: {r2_baseline:.4f}")
+        print(
+            f"   - OLD CHAMPION R²: {old_champion_r2_baseline:.4f}"
+            if old_champion_r2_baseline
+            else "   - OLD CHAMPION R²: N/A"
         )
         if r2_improvement_baseline is not None:
             print(f"   - Improvement: {r2_improvement_baseline:+.4f}")
@@ -474,8 +601,8 @@ def fine_tune_model(**context):
         )
 
         print("\n🆕 Current Test Set (new distribution, 20% of fresh data):")
-        print(f"   - New model R²: {r2_current:.4f}")
-        print(f"   - Champion R²: {current_champion_r2:.4f}")
+        print(f"   - CHALLENGER R²: {r2_current:.4f}")
+        print(f"   - OLD CHAMPION R²: {old_champion_r2_current:.4f}")
         print(f"   - Improvement: {r2_improvement_current:+.4f}")
         print(f"   - RMSE: {metrics_current.get('rmse', 0):.2f}")
         print(f"   - MAE: {metrics_current.get('mae', 0):.2f}")
@@ -492,35 +619,37 @@ def fine_tune_model(**context):
             print(f"   2. Baseline improvement: {r2_improvement_baseline:+.4f}")
         print(f"   3. Current improvement: {r2_improvement_current:+.4f}")
 
-        # Check if champion also has baseline regression
-        champion_has_baseline_regression = (
-            champion_r2_baseline is not None and champion_r2_baseline < 0.60
+        # Check if OLD CHAMPION also has baseline regression
+        old_champion_has_baseline_regression = (
+            old_champion_r2_baseline is not None and old_champion_r2_baseline < 0.60
         )
 
-        if baseline_regression and champion_has_baseline_regression:
+        if baseline_regression and old_champion_has_baseline_regression:
             # Both models fail baseline - compare on current
             if r2_improvement_current > 0:
                 print(
-                    "\n⚠️  DECISION: DEPLOY - Both models fail baseline, new model better on current"
+                    "\n⚠️  DECISION: DEPLOY - Both models fail baseline, CHALLENGER better on current"
                 )
                 print(
-                    f"   → Champion baseline R²: {champion_r2_baseline:.4f} (also < 0.60)"
+                    f"   → OLD CHAMPION baseline R²: {old_champion_r2_baseline:.4f} (also < 0.60)"
                 )
-                print(f"   → New model baseline R²: {r2_baseline:.4f} (also < 0.60)")
+                print(f"   → CHALLENGER baseline R²: {r2_baseline:.4f} (also < 0.60)")
                 print(f"   → Current improved: {r2_improvement_current:+.4f} ✅")
                 decision = "deploy_both_fail_baseline"
             else:
                 print(
                     "\n⏭️  DECISION: SKIP - Both models fail baseline, no improvement on current"
                 )
-                print("   → Keep champion (no better alternative)")
+                print("   → Keep OLD CHAMPION (no better alternative)")
                 decision = "skip_both_fail_baseline"
-        elif baseline_regression and not champion_has_baseline_regression:
-            # New model regressed, champion was fine
-            print("\n🚨 DECISION: REJECT - New model regressed on baseline")
-            if champion_r2_baseline is not None:
-                print(f"   → Champion baseline R²: {champion_r2_baseline:.4f} ✅")
-            print(f"   → New model baseline R²: {r2_baseline:.4f} 🚨 (< 0.60)")
+        elif baseline_regression and not old_champion_has_baseline_regression:
+            # CHALLENGER regressed, OLD CHAMPION was fine
+            print("\n🚨 DECISION: REJECT - CHALLENGER regressed on baseline")
+            if old_champion_r2_baseline is not None:
+                print(
+                    f"   → OLD CHAMPION baseline R²: {old_champion_r2_baseline:.4f} ✅"
+                )
+            print(f"   → CHALLENGER baseline R²: {r2_baseline:.4f} 🚨 (< 0.60)")
             if r2_improvement_baseline is not None:
                 print(f"   → Regression: {r2_improvement_baseline:+.4f}")
             decision = "reject_baseline_regression"
@@ -534,7 +663,7 @@ def fine_tune_model(**context):
             else:
                 improvement_msg = f" ({r2_improvement_current:+.4f})"
 
-            print(f"\n✅ DECISION: DEPLOY - Model improved{improvement_msg}")
+            print(f"\n✅ DECISION: DEPLOY - CHALLENGER improved{improvement_msg}")
             print("   → No baseline regression ✅")
             print(f"   → Current improved: {r2_improvement_current:+.4f} ✅")
             decision = "deploy"
@@ -543,7 +672,7 @@ def fine_tune_model(**context):
             print(
                 f"\n⏭️  DECISION: SKIP - No improvement on current ({r2_improvement_current:+.4f})"
             )
-            print("   → Keep current champion")
+            print("   → Keep OLD CHAMPION")
             decision = "skip_no_improvement"
 
         # Push all metrics to XCom for audit logging
@@ -567,23 +696,114 @@ def fine_tune_model(**context):
         )  # Use current R² for comparison
         context["ti"].xcom_push(key="deployment_decision", value=decision)
         context["ti"].xcom_push(
-            key="champion_r2_baseline",
-            value=float(champion_r2_baseline) if champion_r2_baseline else None,
+            key="old_champion_r2_baseline",
+            value=float(old_champion_r2_baseline) if old_champion_r2_baseline else None,
         )
+        context["ti"].xcom_push(key="old_champion_run_id", value=old_champion_run_id)
+        context["ti"].xcom_push(key="challenger_run_id", value=challenger_run_id)
         context["ti"].xcom_push(
             key="model_uri", value=result.get("model_uri", "unknown")
         )
         context["ti"].xcom_push(key="run_id", value=result.get("run_id", "unknown"))
         context["ti"].xcom_push(key="error_message", value="")
 
+        # Promote champion if deployment decision is deploy
+        if "deploy" in decision:
+            print("\n" + "=" * 60)
+            print("🏆 PROMOTING CHALLENGER TO NEW CHAMPION")
+            print("=" * 60)
+            print(
+                f"📤 OLD CHAMPION → LEGACY: {old_champion_run_id[:8] if old_champion_run_id else 'unknown'}... (is_champion=False)"
+            )
+            print(
+                f"📥 CHALLENGER → NEW CHAMPION: {challenger_run_id[:8]}... (is_champion=True)"
+            )
+            print("=" * 60)
+
+            promote_url = f"{ENV_CONFIG['API_URL']}/promote_champion"
+            promote_payload = {
+                "model_type": "rf",
+                "run_id": result.get("run_id", "unknown"),
+                "env": ENV_CONFIG["ENV"],
+                "test_mode": test_mode,
+            }
+
+            try:
+                promote_response = requests.post(
+                    promote_url, json=promote_payload, headers=headers, timeout=60
+                )
+
+                if promote_response.status_code == 200:
+                    promote_result = promote_response.json()
+                    demoted_run_id = promote_result.get("demoted_run_id", "unknown")
+                    print("\n✅ Champion promotion successful!")
+                    print(
+                        f"   🆕 NEW CHAMPION: {result.get('run_id', 'unknown')[:8]}... (is_champion=True)"
+                    )
+                    print(
+                        f"   📜 LEGACY: {demoted_run_id[:8] if demoted_run_id else 'unknown'}... (is_champion=False)"
+                    )
+                    context["ti"].xcom_push(key="champion_promoted", value=True)
+                    context["ti"].xcom_push(
+                        key="new_champion_run_id", value=result.get("run_id", "unknown")
+                    )
+                    context["ti"].xcom_push(key="legacy_run_id", value=demoted_run_id)
+
+                    # 🆕 Send Discord notification for champion promotion
+                    print("📢 Sending Discord notification for champion promotion...")
+                    send_champion_promotion_alert(
+                        model_type="rf",
+                        run_id=result.get("run_id", "unknown"),
+                        r2_current=r2_current,
+                        r2_baseline=r2_baseline,
+                        improvement_delta=r2_improvement_current,
+                        rmse=metrics_current.get("rmse"),
+                    )
+                else:
+                    print(
+                        f"⚠️ Champion promotion failed: {promote_response.status_code}"
+                    )
+                    print(f"   Response: {promote_response.text}")
+                    context["ti"].xcom_push(key="champion_promoted", value=False)
+                    context["ti"].xcom_push(
+                        key="promotion_error",
+                        value=f"{promote_response.status_code}: {promote_response.text}",
+                    )
+            except Exception as e:
+                print(f"⚠️ Champion promotion request failed: {e}")
+                context["ti"].xcom_push(key="champion_promoted", value=False)
+                context["ti"].xcom_push(key="promotion_error", value=str(e))
+        else:
+            print(f"\n⏭️  Skipping champion promotion (decision: {decision})")
+            context["ti"].xcom_push(key="champion_promoted", value=False)
+
+        # Send Discord notification for training completion
+        deployment_type = (
+            "deploy"
+            if "deploy" in decision
+            else "skip"
+            if "skip" in decision
+            else "reject"
+        )
+        send_training_success(
+            improvement_delta=r2_improvement_current,
+            new_r2=r2_current,
+            old_r2=old_champion_r2_current,
+            deployment_decision=deployment_type,
+        )
+
     except requests.exceptions.Timeout:
-        error_msg = "Training API timeout (>10 minutes)"
+        error_msg = "Training API timeout (>30 minutes)"
         print(f"❌ {error_msg}")
         context["ti"].xcom_push(key="fine_tune_success", value=False)
         context["ti"].xcom_push(key="error_message", value=error_msg)
         context["ti"].xcom_push(key="model_improvement", value=0.0)
         context["ti"].xcom_push(key="baseline_regression", value=False)
         context["ti"].xcom_push(key="double_evaluation_enabled", value=False)
+
+        # Send Discord alert for training failure
+        dag_run_id = context.get("dag_run").run_id
+        send_training_failure(error_msg, dag_run_id)
     except Exception as e:
         error_msg = f"Training failed: {str(e)}"
         print(f"❌ {error_msg}")
@@ -592,6 +812,111 @@ def fine_tune_model(**context):
         context["ti"].xcom_push(key="model_improvement", value=0.0)
         context["ti"].xcom_push(key="baseline_regression", value=False)
         context["ti"].xcom_push(key="double_evaluation_enabled", value=False)
+
+        # Send Discord alert for training failure
+        dag_run_id = context.get("dag_run").run_id
+        send_training_failure(error_msg, dag_run_id)
+
+
+def validate_new_champion(**context):
+    """
+    Validate the newly promoted champion model on recent production data.
+
+    This task runs ONLY if champion was promoted in fine_tune_model.
+    It provides fresh validation metrics for the new champion to replace
+    the old champion's metrics in monitoring dashboards.
+    """
+    # Check if champion was actually promoted
+    champion_promoted = context["ti"].xcom_pull(
+        task_ids="fine_tune_model", key="champion_promoted"
+    )
+
+    if not champion_promoted:
+        print("⏭️  No champion promotion, skipping validation")
+        return
+
+    new_champion_run_id = context["ti"].xcom_pull(
+        task_ids="fine_tune_model", key="new_champion_run_id"
+    )
+
+    print(
+        f"\n🔍 Validating NEW CHAMPION: {new_champion_run_id[:8] if new_champion_run_id else 'unknown'}..."
+    )
+
+    client = bigquery.Client(project=ENV_CONFIG["BQ_PROJECT"])
+
+    # Join predictions with actuals (last 7 days) - same query as validate_model
+    query = f"""
+    WITH recent_predictions AS (
+        SELECT
+            p.prediction,
+            p.identifiant_du_compteur,
+            PARSE_TIMESTAMP('%Y-%m-%d %H:%M:%S%Ez', p.date_et_heure_de_comptage) as date_et_heure_de_comptage,
+            p.prediction_ts
+        FROM `{ENV_CONFIG["BQ_PROJECT"]}.{ENV_CONFIG["BQ_PREDICT_DATASET"]}.daily_*` p
+        WHERE _TABLE_SUFFIX >= FORMAT_DATE('%Y%m%d', DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY))
+    ),
+    recent_actuals AS (
+        SELECT
+            r.comptage_horaire as true_value,
+            r.identifiant_du_compteur,
+            r.date_et_heure_de_comptage
+        FROM `{ENV_CONFIG["BQ_PROJECT"]}.{ENV_CONFIG["BQ_RAW_DATASET"]}.comptage_velo` r
+        WHERE r.date_et_heure_de_comptage >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 7 DAY)
+    )
+    SELECT
+        p.prediction,
+        a.true_value
+    FROM recent_predictions p
+    JOIN recent_actuals a
+        ON p.identifiant_du_compteur = a.identifiant_du_compteur
+        AND p.date_et_heure_de_comptage = a.date_et_heure_de_comptage
+    WHERE a.true_value IS NOT NULL
+    LIMIT 1000
+    """  # nosec B608
+
+    print("📥 Loading predictions and actuals for new champion...")
+    df = client.query(query).to_dataframe()
+
+    if df.empty or len(df) < 10:
+        print(f"⚠️ Insufficient data for validation (only {len(df)} samples)")
+        # Push default values
+        context["ti"].xcom_push(key="new_champion_rmse", value=999.0)
+        context["ti"].xcom_push(key="new_champion_r2", value=0.0)
+        context["ti"].xcom_push(key="new_champion_validation_samples", value=len(df))
+        return
+
+    print(f"✅ Loaded {len(df)} validation samples")
+
+    # Calculate metrics for new champion
+    from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
+
+    y_true = df["true_value"]
+    y_pred = df["prediction"]
+
+    rmse = np.sqrt(mean_squared_error(y_true, y_pred))
+    mae = mean_absolute_error(y_true, y_pred)
+    r2 = r2_score(y_true, y_pred)
+
+    print("\n📈 NEW CHAMPION Validation Metrics:")
+    print(f"   - RMSE: {rmse:.2f}")
+    print(f"   - MAE: {mae:.2f}")
+    print(f"   - R²: {r2:.4f}")
+    print(f"   - Samples: {len(df)}")
+
+    # Push metrics to XCom (will be used by end_monitoring to update BigQuery)
+    context["ti"].xcom_push(key="new_champion_rmse", value=float(rmse))
+    context["ti"].xcom_push(key="new_champion_mae", value=float(mae))
+    context["ti"].xcom_push(key="new_champion_r2", value=float(r2))
+    context["ti"].xcom_push(key="new_champion_validation_samples", value=len(df))
+
+    # Send Discord notification
+    print("📢 Sending Discord notification for new champion validation...")
+    send_performance_alert(
+        r2=r2,
+        rmse=rmse,
+        threshold=0.70,  # Info level, not critical
+    )
 
 
 def end_monitoring(**context):
@@ -611,8 +936,24 @@ def end_monitoring(**context):
     drift_detected = context["ti"].xcom_pull(
         task_ids="monitor_drift", key="drift_detected"
     )
-    rmse = context["ti"].xcom_pull(task_ids="validate_model", key="rmse")
-    r2 = context["ti"].xcom_pull(task_ids="validate_model", key="r2")
+
+    # Check if we have new champion validation metrics (from validate_new_champion task)
+    new_champion_rmse = context["ti"].xcom_pull(
+        task_ids="validate_new_champion", key="new_champion_rmse"
+    )
+    new_champion_r2 = context["ti"].xcom_pull(
+        task_ids="validate_new_champion", key="new_champion_r2"
+    )
+
+    # If new champion was validated, use those metrics; otherwise use old champion metrics
+    if new_champion_rmse is not None and new_champion_r2 is not None:
+        print("✅ Using NEW champion validation metrics from validate_new_champion")
+        rmse = new_champion_rmse
+        r2 = new_champion_r2
+    else:
+        print("✅ Using OLD champion validation metrics from validate_model")
+        rmse = context["ti"].xcom_pull(task_ids="validate_model", key="rmse")
+        r2 = context["ti"].xcom_pull(task_ids="validate_model", key="r2")
 
     # Check if fine-tuning was executed
     fine_tune_success = context["ti"].xcom_pull(
@@ -638,6 +979,11 @@ def end_monitoring(**context):
     deployment_decision = context["ti"].xcom_pull(
         task_ids="fine_tune_model", key="deployment_decision"
     )
+    # Note: This is the OLD CHAMPION's R² on baseline (before promotion)
+    # Kept as "champion_r2_baseline" for BigQuery schema compatibility
+    old_champion_r2_baseline = context["ti"].xcom_pull(
+        task_ids="fine_tune_model", key="old_champion_r2_baseline"
+    )
     model_uri = context["ti"].xcom_pull(task_ids="fine_tune_model", key="model_uri")
     run_id = context["ti"].xcom_pull(task_ids="fine_tune_model", key="run_id")
 
@@ -653,6 +999,7 @@ def end_monitoring(**context):
         r2_current = None
         r2_train = None
         deployment_decision = "not_triggered"
+        old_champion_r2_baseline = None
         model_uri = ""
         run_id = ""
     else:
@@ -682,6 +1029,11 @@ def end_monitoring(**context):
         "deployment_decision": deployment_decision
         if deployment_decision
         else "not_triggered",
+        # Note: Stored as "champion_r2_baseline" for BigQuery schema compatibility
+        # This represents the OLD CHAMPION's R² on baseline (before any promotion)
+        "champion_r2_baseline": float(old_champion_r2_baseline)
+        if old_champion_r2_baseline is not None
+        else None,
         "model_uri": model_uri if model_uri else "",
         "run_id": run_id if run_id else "",
     }
@@ -699,15 +1051,49 @@ def end_monitoring(**context):
 
     print(f"✅ Audit log written to {table_id}")
 
+    # Get champion/challenger info from previous tasks
+    old_champion_run_id = context["ti"].xcom_pull(
+        task_ids="validate_model", key="champion_run_id"
+    )
+    challenger_run_id = context["ti"].xcom_pull(
+        task_ids="fine_tune_model", key="challenger_run_id"
+    )
+    new_champion_run_id = context["ti"].xcom_pull(
+        task_ids="fine_tune_model", key="new_champion_run_id"
+    )
+    legacy_run_id = context["ti"].xcom_pull(
+        task_ids="fine_tune_model", key="legacy_run_id"
+    )
+    champion_promoted = context["ti"].xcom_pull(
+        task_ids="fine_tune_model", key="champion_promoted"
+    )
+
     # Enhanced summary with double evaluation
     print("\n" + "=" * 60)
     print("📋 MONITORING SUMMARY")
     print("=" * 60)
-    print(f"Drift detected: {'🚨 YES' if drift_detected else '✅ NO'}")
-    print(
-        f"Current champion RMSE: {rmse:.2f}" if rmse else "Current champion RMSE: N/A"
-    )
-    print(f"Current champion R²: {r2:.4f}" if r2 else "Current champion R²: N/A")
+
+    # Show model status
+    if fine_tune_triggered and champion_promoted:
+        print(
+            f"🏆 NEW CHAMPION: {new_champion_run_id[:8] if new_champion_run_id else 'unknown'}... (is_champion=True)"
+        )
+        print(
+            f"📜 LEGACY: {legacy_run_id[:8] if legacy_run_id else 'unknown'}... (is_champion=False)"
+        )
+    elif fine_tune_triggered and challenger_run_id:
+        print(
+            f"🏆 CHAMPION (unchanged): {old_champion_run_id[:8] if old_champion_run_id else 'unknown'}... (is_champion=True)"
+        )
+        print(f"❌ CHALLENGER (rejected): {challenger_run_id[:8]}...")
+    else:
+        print(
+            f"🏆 CHAMPION: {old_champion_run_id[:8] if old_champion_run_id else 'unknown'}... (is_champion=True)"
+        )
+
+    print(f"\nDrift detected: {'🚨 YES' if drift_detected else '✅ NO'}")
+    print(f"Champion RMSE: {rmse:.2f}" if rmse else "Champion RMSE: N/A")
+    print(f"Champion R²: {r2:.4f}" if r2 else "Champion R²: N/A")
 
     if fine_tune_triggered:
         print(f"\nFine-tuning: {'✅ SUCCESS' if fine_tune_success else '❌ FAILED'}")
@@ -791,10 +1177,18 @@ with DAG(
         task_id="fine_tune_model",
         python_callable=fine_tune_model,
         provide_context=True,
-        execution_timeout=timedelta(minutes=30),
+        execution_timeout=timedelta(minutes=45),
     )
 
-    # Task 4b: End without training (alternative branch)
+    # Task 4b: Validate new champion (runs after fine_tune if champion was promoted)
+    validate_new_champ = PythonOperator(
+        task_id="validate_new_champion",
+        python_callable=validate_new_champion,
+        provide_context=True,
+        trigger_rule="none_failed_or_skipped",  # Only run if fine_tune succeeded
+    )
+
+    # Task 5: End monitoring (runs regardless of branch taken)
     end = PythonOperator(
         task_id="end_monitoring",
         python_callable=end_monitoring,
@@ -805,4 +1199,4 @@ with DAG(
     # Pipeline flow
     monitor >> validate >> decide
     decide >> [fine_tune, end]
-    fine_tune >> end
+    fine_tune >> validate_new_champ >> end

@@ -1,5 +1,9 @@
 # Claude Code Project Instructions
 
+CRITICAL: Minimize token usage.
+Be extremely concise.
+No explanations unless asked.
+
 ## Code Attribution Policy
 
 **IMPORTANT**: Never include any attribution to Claude Code or AI assistance in:

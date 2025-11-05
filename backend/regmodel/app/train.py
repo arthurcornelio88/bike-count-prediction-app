@@ -150,12 +150,12 @@ def evaluate_double(
 
     This implements the double test set evaluation strategy:
     - test_baseline: Fixed reference test set (evaluates regression)
-    - test_current: 20% of current data (evaluates performance on new distribution)
+    - test_current: Pre-split test portion from current data (evaluates performance on new distribution)
 
     Args:
         model: Trained model (RFPipeline, NNPipeline, or AffluenceClassifierPipeline)
         test_baseline_path: Path to test_baseline.csv (local or GCS)
-        current_data_df: Current data DataFrame (will be split 80/20)
+        current_data_df: Current test data DataFrame (ALREADY split, typically 20% of original current_data)
         model_type: "rf", "nn", or "rf_class"
         test_mode: If True, skip test_baseline evaluation (too large for testing)
 
@@ -166,10 +166,9 @@ def evaluate_double(
             - baseline_regression: bool (True if R² < 0.60)
             - test_current_size: int
             - test_baseline_size: int
-            - train_current_data: DataFrame (80% of current_data for augmented training)
 
     Raises:
-        ValueError: If current_data_df has < 200 samples (insufficient for 80/20 split)
+        ValueError: If current_data_df is empty
     """
     from sklearn.metrics import mean_absolute_error
     import tempfile
@@ -190,18 +189,12 @@ def evaluate_double(
         test_baseline_size = len(y_baseline)
         print(f"✅ Baseline test set loaded: {test_baseline_size} samples")
 
-    # 2. Split current data (80/20) - use 20% for testing
-    if len(current_data_df) < 200:
-        raise ValueError(
-            f"Insufficient current data: {len(current_data_df)} samples < 200 minimum. "
-            "Need at least 200 samples for reliable 80/20 split."
-        )
+    # 2. Use pre-split current test data (no need to re-split)
+    if len(current_data_df) == 0:
+        raise ValueError("current_data_df is empty")
 
-    print(f"\n📊 Splitting current data (n={len(current_data_df)})...")
-    test_current = current_data_df.sample(frac=0.2, random_state=42)
-    train_current = current_data_df.drop(test_current.index)
-    print(f"   - Train portion (80%): {len(train_current)} samples")
-    print(f"   - Test portion (20%): {len(test_current)} samples")
+    print(f"\n📊 Evaluating on current test data (n={len(current_data_df)})...")
+    test_current = current_data_df
 
     # Prepare test_current for evaluation
     # Save to temp file for load_and_clean_data to work
@@ -274,7 +267,6 @@ def evaluate_double(
         "baseline_regression": baseline_regression,
         "test_current_size": len(y_current),
         "test_baseline_size": test_baseline_size,
-        "train_current_data": train_current,  # Return 80% for augmented training
     }
 
 
@@ -382,7 +374,7 @@ def train_rf(X, y, env, test_mode, data_source="reference", current_data_df=None
             try:
                 # Create a temporary pipeline with baseline's transformers
                 # This ensures current_data gets the SAME transformations as baseline
-                from app.classes import RawCleanerTransformer, TimeFeatureTransformer
+                from app.classes import RawCleanerTransformer
 
                 # Separate target from current data
                 if "Comptage horaire" in train_current_df.columns:
@@ -400,37 +392,78 @@ def train_rf(X, y, env, test_mode, data_source="reference", current_data_df=None
                         "Target column 'Comptage horaire' not found in current_data"
                     )
 
-                # Apply same transformations as baseline
+                # Check schema compatibility by transforming samples
                 cleaner = RawCleanerTransformer(keep_compteur=True)
-                train_current_clean = cleaner.fit_transform(train_current_df)
+                X_baseline_sample = cleaner.fit_transform(X.head(10))
+                train_current_sample = cleaner.fit_transform(train_current_df.head(10))
 
-                time_transformer = TimeFeatureTransformer()
-                X_current = time_transformer.fit_transform(train_current_clean)
+                common_cols = sorted(
+                    list(
+                        set(X_baseline_sample.columns)
+                        & set(train_current_sample.columns)
+                    )
+                )
 
-                # Ensure column alignment with baseline
-                common_cols = sorted(list(set(X.columns) & set(X_current.columns)))
+                # DEBUG: Print columns for diagnosis
+                print(
+                    f"   🔍 DEBUG - Baseline columns: {sorted(X_baseline_sample.columns.tolist())}"
+                )
+                print(
+                    f"   🔍 DEBUG - Current columns: {sorted(train_current_sample.columns.tolist())}"
+                )
+                print(
+                    f"   🔍 DEBUG - Common columns ({len(common_cols)}): {common_cols}"
+                )
 
-                if len(common_cols) < len(X.columns) * 0.8:  # Less than 80% overlap
+                if (
+                    len(common_cols) < len(X_baseline_sample.columns) * 0.8
+                ):  # Less than 80% overlap
                     print(
-                        f"   ⚠️  Only {len(common_cols)}/{len(X.columns)} common columns - schema mismatch!"
+                        f"   ⚠️  Only {len(common_cols)}/{len(X_baseline_sample.columns)} common columns - schema mismatch!"
                     )
                     print("   → Falling back to baseline-only training")
                     mlflow.log_metric("sliding_window_enabled", 0)
                     X_train_final = X
                     y_train_final = y
                 else:
-                    # Filter both to common columns
-                    X_baseline_filtered = X[common_cols]
-                    X_current_filtered = X_current[common_cols]
+                    # Schemas are compatible! Concatenate RAW data
+                    # RFPipeline will transform uniformly
 
-                    # Concatenate
+                    # IMPORTANT: Normalize column names BEFORE concat to avoid duplicates
+                    # (Baseline has Title Case, Current has snake_case)
+
+                    def normalize_columns(df):
+                        df = df.copy()
+                        df.columns = (
+                            df.columns.str.replace(r"\W+", "_", regex=True)
+                            .str.replace(r"^_+", "", regex=True)
+                            .str.lower()
+                            .str.strip()
+                        )
+                        return df
+
+                    X_normalized = normalize_columns(X)
+                    train_current_normalized = normalize_columns(train_current_df)
+
+                    print(
+                        f"   🔍 Baseline columns (normalized): {sorted(X_normalized.columns.tolist())}"
+                    )
+                    print(
+                        f"   🔍 Current columns (normalized): {sorted(train_current_normalized.columns.tolist())}"
+                    )
+
+                    # Remove any remaining duplicate columns
+                    train_current_filtered = train_current_normalized.loc[
+                        :, ~train_current_normalized.columns.duplicated()
+                    ]
+
                     X_train_final = pd.concat(
-                        [X_baseline_filtered, X_current_filtered], ignore_index=True
+                        [X_normalized, train_current_filtered], ignore_index=True
                     )
                     y_train_final = np.concatenate([y, y_current.to_numpy()])
 
                     print(f"   ✅ train_baseline: {len(X):,} samples")
-                    print(f"   ✅ train_current:  {len(X_current):,} samples")
+                    print(f"   ✅ train_current:  {len(train_current_df):,} samples")
                     print(f"   ✅ TOTAL training: {len(X_train_final):,} samples")
                     print(f"   ✅ Common features: {len(common_cols)} columns")
                     print("   📊 New compteurs will be learned in model weights!")
@@ -438,7 +471,7 @@ def train_rf(X, y, env, test_mode, data_source="reference", current_data_df=None
                     # Log sliding window metrics
                     mlflow.log_metric("sliding_window_enabled", 1)
                     mlflow.log_metric("train_baseline_size", len(X))
-                    mlflow.log_metric("train_current_size", len(X_current))
+                    mlflow.log_metric("train_current_size", len(train_current_df))
                     mlflow.log_metric("train_total_size", len(X_train_final))
                     mlflow.log_metric("common_features", len(common_cols))
 

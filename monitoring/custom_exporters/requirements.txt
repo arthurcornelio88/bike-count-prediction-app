@@ -1,0 +1,5 @@
+flask==3.0.0
+prometheus-client==0.20.0
+requests==2.31.0
+python-dateutil==2.9.0
+google-cloud-bigquery==3.25.0

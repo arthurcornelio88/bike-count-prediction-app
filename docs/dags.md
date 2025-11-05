@@ -256,10 +256,34 @@ Schema:
 comptage_horaire              INTEGER   - Actual value (if available)
 prediction                    FLOAT     - Model prediction
 model_type                    STRING    - Model used (rf/nn)
-model_version                 STRING    - Model run_id from MLflow
+model_version                 STRING    - Champion model run_id from MLflow (for traceability)
 prediction_ts                 TIMESTAMP - When prediction was made
 identifiant_du_compteur       STRING    - Counter ID
 date_et_heure_de_comptage     TIMESTAMP - Data timestamp
+```
+
+**Champion Tracking** (Phase 5 - MLOps Monitoring):
+
+Every prediction is now tagged with the exact champion model that produced it:
+
+- The `/predict` API returns model metadata including `run_id`, `is_champion`, `r2`, and `rmse`
+- The `model_version` field stores the champion's MLflow `run_id` (instead of a timestamp)
+- This enables full traceability from prediction → model version → training metrics
+- Champion metadata is also pushed to XCom for audit purposes
+
+Example API response:
+
+```json
+{
+  "predictions": [123.4, 234.5, ...],
+  "model_metadata": {
+    "run_id": "849e4ce4402dd7dba3e94f1888663304",
+    "is_champion": true,
+    "model_type": "rf",
+    "r2": 0.9087,
+    "rmse": 32.25
+  }
+}
 ```
 
 ![alt text](/docs/img/predictions_bq.png)
@@ -280,6 +304,10 @@ date_et_heure_de_comptage     TIMESTAMP - Data timestamp
 ```
 
 ![alt text](/docs/img/predict_daily_data.png)
+
+**Alerting**:
+
+![alt text](/docs/img/predictions_discord.png)
 
 #### 2.3 `validate_predictions`
 
@@ -461,31 +489,141 @@ Invokes the FastAPI `/train` endpoint with `data_source="baseline"` and optional
 - Sliding-window strategy: combines baseline training data with fresh samples when schemas align
 - Double evaluation: champion vs new model on `test_baseline` + holdout current data
 - Writes result metrics, run ids, and deployment decision back to XCom for auditing
+- **Champion Promotion**: When decision="deploy", calls `/promote_champion` endpoint to update `summary.json`
 
-**Real Production Run Results (2025-11-03, force=true, test_mode=false)**:
+**Real Production Run Results (2025-11-05, test_mode=false)**:
+
+![fine_tune_model screenshot](/docs/img/dag3_finetuning_1.png)
+
+![alt text](/docs/img/dag3_finetuning_2.png)
 
 - **Baseline Test Set** (181K samples, fixed reference):
-  - New model R²: **0.8161** (excellent!)
-  - Champion R²: **0.3091** (old compteurs distribution)
-  - Improvement: **+0.5070** (massive improvement)
+  - New model R²: **0.8179** (excellent!)
+  - Old champion R²: **0.1945** (previous model trained on limited data)
+  - Improvement: **+0.6234** (massive improvement)
+  - RMSE: **72.86**
+  - MAE: **34.01**
   - Baseline regression: ✅ NO (R² > 0.60)
 
 - **Current Test Set** (20% of fresh data, new distribution):
-  - New model R²: **0.9087**
-  - Champion R²: **0.7214**
-  - Improvement: **+0.1872** (significant improvement)
+  - New model R²: **0.8167**
+  - Old champion R²: **0.5847**
+  - Improvement: **+0.2320** (significant improvement)
+  - RMSE: **47.26**
+  - MAE: **36.46**
 
-- **Training Metrics** (on train_baseline):
-  - R²: **0.8666** (strong generalization)
+- **Training Metrics** (on train_baseline, 726K samples):
+  - R²: **0.8658** (strong generalization)
+  - RMSE: **64.89**
 
 - **Deployment Decision**: ✅ **DEPLOY** - Model improved on both test sets
   - No baseline regression detected
-  - Current distribution: +18.72% improvement
-  - Baseline distribution: +50.70% improvement
+  - Current distribution: +23.20% improvement
+  - Baseline distribution: +62.34% improvement
 
-![fine_tune_model screenshot](/docs/img/dag3_finetuning2.png)
+**Champion Promotion Flow** (Phase 5 - MLOps Monitoring):
 
-#### 3.5 `end_monitoring`
+When deployment decision contains "deploy", the DAG automatically promotes the new model:
+
+1. Calls `POST /promote_champion` with run_id, model_type, env
+2. FastAPI updates `summary.json` in GCS:
+   - Sets `is_champion=true` for new model
+   - Sets `is_champion=false` for previous champion
+3. Clears FastAPI model cache (both model and metadata) to force reload
+4. Sends Discord notification with champion details (run_id, R² scores, improvement delta)
+5. Next `/predict` call loads new champion via `get_best_model_from_summary()`
+
+**Discord Notification**:
+
+When a new champion is promoted, the team receives a Discord alert with:
+
+- Model type and run_id (first 12 chars)
+- R² scores on both test_current and test_baseline
+- Improvement delta over previous champion
+- RMSE metric
+
+Example Discord notification:
+
+![alt text](/docs/img/dag3_training_champion.png)
+
+This ensures `dag_daily_prediction` automatically uses the promoted model without manual intervention, and the team is immediately aware of production model changes.
+
+#### 3.5 `validate_new_champion`
+
+**NEW TASK** (Added 2025-11-05): Re-validates the newly promoted champion model on recent production data.
+
+**Why This Task is Critical**:
+
+When a new model is promoted to champion, we face a **metrics staleness problem**:
+
+1. `validate_model` (task 3.2) runs **BEFORE** training and validates the **OLD champion**
+2. After promotion, BigQuery `monitoring_audit.logs` still contains the OLD champion's metrics
+3. Prometheus/Grafana read from BigQuery → dashboards show **stale metrics** for a model that's no longer in production
+4. Without re-validation, monitoring dashboards would display R²=0.5847 (old champion) instead of the actual new champion's performance
+
+**Solution**: `validate_new_champion` validates the **NEW champion** after promotion and updates BigQuery with fresh metrics.
+
+**Execution Logic**:
+
+- **Conditional execution**: Only runs if `champion_promoted=True` (checked via XCom from `fine_tune_model`)
+- If no promotion occurred, task exits early with "⏭️ No champion promotion, skipping validation"
+- If promotion occurred, proceeds to validate the new champion
+
+**Validation Process**:
+
+1. Pulls new champion's `run_id` from XCom
+2. Queries BigQuery for predictions vs actuals (last 7 days) - same logic as `validate_model`
+3. Calculates RMSE, MAE, R² on production data
+4. Pushes metrics to XCom: `new_champion_rmse`, `new_champion_r2`, `new_champion_mae`
+5. Sends Discord notification (info level, not critical)
+
+**Example Output**:
+
+```text
+🔍 Validating NEW CHAMPION: 7f37401f...
+📥 Loading predictions and actuals for new champion...
+✅ Loaded 1000 validation samples
+
+📈 NEW CHAMPION Validation Metrics:
+   - RMSE: 82.43
+   - MAE: 38.02
+   - R²: 0.5536
+   - Samples: 1000
+```
+
+**Integration with end_monitoring**:
+
+The `end_monitoring` task (3.6) checks for these new metrics:
+
+```python
+# Check if we have new champion validation metrics
+new_champion_rmse = context["ti"].xcom_pull(
+    task_ids="validate_new_champion", key="new_champion_rmse"
+)
+new_champion_r2 = context["ti"].xcom_pull(
+    task_ids="validate_new_champion", key="new_champion_r2"
+)
+
+# If new champion was validated, use those metrics
+if new_champion_rmse is not None and new_champion_r2 is not None:
+    rmse = new_champion_rmse
+    r2 = new_champion_r2
+else:
+    # Use old champion metrics from validate_model
+    rmse = context["ti"].xcom_pull(task_ids="validate_model", key="rmse")
+    r2 = context["ti"].xcom_pull(task_ids="validate_model", key="r2")
+```
+
+This ensures BigQuery receives the **correct champion metrics**, which Prometheus then exposes to Grafana.
+
+**Impact**:
+
+✅ Grafana dashboards immediately reflect new champion's performance
+✅ Monitoring alerts trigger on actual production model metrics
+✅ Team has visibility into post-promotion model behavior
+✅ Audit trail tracks both pre- and post-promotion metrics
+
+#### 3.6 `end_monitoring`
 
 Final task that consolidates all run metadata and writes an audit record to BigQuery (`monitoring_audit.logs`).
 
@@ -495,18 +633,19 @@ Final task that consolidates all run metadata and writes an audit record to BigQ
 - Model improvement delta, model URI, run id, decision rationale
 - `baseline_regression` & `double_evaluation_enabled` indicators
 
-**Real Production Run Summary (2025-11-03)**:
+**Real Production Run Summary (2025-11-05)**:
 
 The audit log captured the complete monitoring cycle showing:
 
 - **Drift Detection**: ✅ YES (50% drift share detected)
-- **Current Champion**: RMSE=32.25, R²=0.7214 (excellent production performance)
+- **Current Champion**: RMSE=78.30, R²=0.5847 (degraded performance, below critical threshold)
 - **Fine-tuning**: ✅ SUCCESS with double evaluation enabled
-- **Model Improvement**: +0.1872 on current test set
+- **Model Improvement**: +0.2320 on current test set, +0.6234 on baseline test set
+- **Training Details**: 726,192 samples (724K baseline + 1.6K current via sliding window)
 - **Deployment Decision**: ✅ DEPLOY - New model promoted to production
-- **Model URI**: `gs://df_traffic_cyclist1/mlflow-artifacts/1/849e4ce4402dd7dba3e94f1888663304/artifacts/model`
+- **Model URI**: `gs://df_traffic_cyclist1/mlflow-artifacts/1/fc7d64d16b3b48aebf94512933ad92c9/artifacts/model`
 
-This demonstrates the complete MLOps loop: drift detection → validation → training → double evaluation → deployment decision → audit logging.
+This demonstrates the complete MLOps loop: drift detection → validation → training → double evaluation → deployment decision → champion promotion → audit logging.
 
 ![end_monitoring screenshot](/docs/img/dag3_end_monitoring2.png)
 
@@ -518,24 +657,45 @@ This demonstrates the complete MLOps loop: drift detection → validation → tr
 
 ### Data Flow Summary
 
+**Updated Flow (with validate_new_champion)**:
+
 ```text
 Reference CSV (data/reference_data.csv)      BigQuery current window (7 days)
                  │                                      │
                  └── monitor_drift ──── drift summary ──┘
                                    │
-                      validate_model (RMSE / R²)
+                      validate_model (OLD champion RMSE / R²)
                                    │
                       decide_fine_tune (branch)
-                       │                       │
-         fine_tune_model (FastAPI /train)   end_monitoring
-                       │                       │
-            MLflow + GCS artifacts      BigQuery monitoring_audit.logs
+                       │                                          │
+         ┌─────────────┴────────────────┐                        │
+         │                              │                        │
+   fine_tune_model            end_monitoring (no training)       │
+   (train + promote)                    │                        │
+         │                              │                        │
+   validate_new_champion                │                        │
+   (NEW champion metrics)               │                        │
+         │                              │                        │
+         └──────────────┬───────────────┘                        │
+                        │                                         │
+                end_monitoring ─────────────────────────────────┘
+                (uses NEW champion metrics if promotion,
+                 else uses OLD champion metrics)
+                        │
+           BigQuery monitoring_audit.logs
+                        │
+                  Prometheus/Grafana
+                  (shows correct champion R²)
 ```
 
-### Runbook Checklist
+**Key Flow Changes**:
 
-- [ ] Monitor drift report shows `drift_share` and column overlap status
-- [ ] Validation task logs RMSE/R² and sample count
-- [ ] Decision task prints branch rationale (drift, metrics, force flag)
-- [ ] Fine-tuning logs include sliding-window status + double evaluation metrics
-- [ ] Audit record written with `fine_tune_triggered` and `model_improvement`
+1. `validate_model` → validates **OLD champion** (before training)
+2. `fine_tune_model` → trains challenger, promotes if better
+3. `validate_new_champion` → validates **NEW champion** (after promotion, conditional)
+4. `end_monitoring` → writes correct metrics to BigQuery:
+   - If promotion → uses `validate_new_champion` metrics
+   - If no promotion → uses `validate_model` metrics
+5. Prometheus reads BigQuery → Grafana displays current champion's actual performance
+
+---

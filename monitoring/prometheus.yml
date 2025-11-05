@@ -4,14 +4,32 @@ global:
   scrape_interval: 15s  # Scrape targets every 15 seconds
   evaluation_interval: 15s  # Evaluate rules every 15 seconds
 
+# Alert rules (loaded from alerts.yml)
+# rule_files:
+#   - 'alerts.yml'
+
 # Scrape configuration
 scrape_configs:
-  # RegModel API metrics
+  # RegModel FastAPI metrics (Phase 4 - to be instrumented)
   - job_name: 'regmodel-api'
     static_configs:
       - targets: ['regmodel-backend:8000']
     metrics_path: '/metrics'
     scrape_interval: 10s
+
+  # Airflow metrics (Phase 4 - custom exporter)
+  - job_name: 'airflow-metrics'
+    static_configs:
+      - targets: ['airflow-exporter:9101']
+    metrics_path: '/metrics'
+    scrape_interval: 30s  # Exporter caches for 60s, so 30s is good
+
+  # Pushgateway (for testing alerts with mock metrics)
+  - job_name: 'pushgateway'
+    honor_labels: true  # Preserve job labels from pushed metrics
+    static_configs:
+      - targets: ['pushgateway:9091']
+    scrape_interval: 5s  # Fast scraping for testing
 
   # Prometheus self-monitoring
   - job_name: 'prometheus'

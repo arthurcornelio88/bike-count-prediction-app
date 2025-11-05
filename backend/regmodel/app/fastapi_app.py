@@ -8,8 +8,20 @@ from typing import List
 import pandas as pd
 
 from app.model_registry_summary import get_best_model_from_summary
+from app.model_registry_summary import get_full_summary  # type: ignore[attr-defined]
+from app.model_registry_summary import promote_champion  # type: ignore[attr-defined]
+from app.middleware.prometheus_metrics import (
+    PrometheusMiddleware,
+    prometheus_response,
+)
 
 app = FastAPI()
+app.add_middleware(PrometheusMiddleware)
+
+
+@app.get("/metrics")
+def metrics_endpoint():
+    return prometheus_response()
 
 
 def setup_credentials():
@@ -32,8 +44,9 @@ def setup_credentials():
     print("✅ Credentials injectés via GCP_JSON_CONTENT")
 
 
-# === Cache global des modèles ===
+# === Cache global des modèles et métadonnées ===
 model_cache = {}
+model_metadata_cache = {}  # 🆕 Cache for model metadata (run_id, is_champion, etc.)
 
 
 # === Fonction utilitaire de cache avec nettoyage ===
@@ -45,8 +58,22 @@ def get_cache_dir(model_type: str, metric: str) -> str:
     return path
 
 
-def get_cached_model(model_type: str, metric: str):
-    key = (model_type, metric)
+def get_cached_model(
+    model_type: str, metric: str, env: str = "prod", test_mode: bool = False
+):
+    """
+    Get cached model and metadata.
+
+    Args:
+        model_type: Type of model (rf, nn, rf_class)
+        metric: Metric to select champion (r2, rmse)
+        env: Environment (prod, dev) - defaults to prod
+        test_mode: Test mode flag - defaults to False
+
+    Returns:
+        tuple: (model, metadata_dict) where metadata includes run_id, is_champion, etc.
+    """
+    key = (model_type, metric, env, test_mode)  # Include env and test_mode in cache key
     if key not in model_cache:
         cache_dir = get_cache_dir(model_type, metric)
 
@@ -56,25 +83,33 @@ def get_cached_model(model_type: str, metric: str):
 
         os.makedirs(cache_dir, exist_ok=True)
 
-        model = get_best_model_from_summary(
+        # 🆕 Request model WITH metadata
+        model, metadata = get_best_model_from_summary(  # type: ignore[call-arg]
             model_type=model_type,
             metric=metric,
             summary_path="gs://df_traffic_cyclist1/models/summary.json",
-            env="prod",
+            env=env,  # Use provided env parameter
+            test_mode=test_mode,  # Use provided test_mode parameter
             download_dir=cache_dir,  # ← Important pour contrôler le chemin
+            return_metadata=True,  # 🆕 Get metadata along with model
         )
         model_cache[key] = model
-    return model_cache[key]
+        model_metadata_cache[key] = metadata  # 🆕 Cache metadata separately
+
+    return model_cache[key], model_metadata_cache[key]
 
 
 # === Chargement anticipé au démarrage ===
 @app.on_event("startup")
 def preload_models():
     setup_credentials()
-    print("🚀 Préchargement des modèles...")
+    # Load env from environment variable (defaults to "prod")
+    env = os.getenv("MODEL_ENV", "prod").lower()
+    test_mode = os.getenv("MODEL_TEST_MODE", "false").lower() == "true"
+    print(f"🚀 Préchargement des modèles (env={env}, test_mode={test_mode})...")
     for model_type, metric in [("rf", "r2"), ("nn", "r2")]:
         try:
-            get_cached_model(model_type, metric)
+            get_cached_model(model_type, metric, env=env, test_mode=test_mode)
             print(f"✅ Modèle {model_type} ({metric}) préchargé.")
         except Exception as e:
             print(f"⚠️ Erreur de chargement pour {model_type} ({metric}) : {e}")
@@ -93,9 +128,27 @@ def predict(data: PredictRequest):
     df = pd.DataFrame(data.records)
 
     try:
-        model = get_cached_model(data.model_type, data.metric)
+        # Load env from environment variable (same as preload)
+        env = os.getenv("MODEL_ENV", "prod").lower()
+        test_mode = os.getenv("MODEL_TEST_MODE", "false").lower() == "true"
+
+        model, metadata = get_cached_model(
+            data.model_type, data.metric, env=env, test_mode=test_mode
+        )  # 🆕 Get metadata too
         y_pred = model.predict_clean(df)
-        return {"predictions": y_pred.tolist()}
+        predictions = y_pred.tolist()
+
+        # 🆕 Return predictions WITH champion metadata
+        return {
+            "predictions": predictions,
+            "model_metadata": {
+                "run_id": metadata.get("run_id"),
+                "is_champion": metadata.get("is_champion", False),
+                "model_type": metadata.get("model_type"),
+                "r2": metadata.get("r2"),
+                "rmse": metadata.get("rmse"),
+            },
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -146,6 +199,12 @@ def train_endpoint(request: TrainRequest):
         current_df = None
         if request.current_data:
             current_df = pd.DataFrame(request.current_data)
+
+            # No date normalization needed - pandas auto-detects both formats:
+            # BigQuery format: "2025-11-01 10:00:00+00:00"
+            # CSV baseline format: "2025-11-01T10:00:00+00:00"
+            # RawCleanerTransformer will handle both with pd.to_datetime(utc=True)
+
             print(
                 f"📥 Received {len(current_df)} current data samples for double evaluation"
             )
@@ -175,6 +234,9 @@ def train_endpoint(request: TrainRequest):
                 {
                     "metrics_baseline": result.get("metrics_baseline"),
                     "metrics_current": result.get("metrics_current"),
+                    "double_eval_metrics": result.get(
+                        "metrics_current"
+                    ),  # Alias for client compatibility
                     "baseline_regression": result.get("baseline_regression", False),
                     "double_evaluation_enabled": True,
                 }
@@ -250,18 +312,26 @@ def evaluate_endpoint(request: EvaluateRequest):
         print(f"✅ Test baseline loaded: {test_size} samples")
 
         # Load model (champion or specific URI)
+        # Load env from environment variable (same as preload)
+        env = os.getenv("MODEL_ENV", "prod").lower()
+        test_mode = os.getenv("MODEL_TEST_MODE", "false").lower() == "true"
+
         if request.model_uri:
             print(f"📦 Loading model from URI: {request.model_uri}")
             # TODO: Implement MLflow model loading by URI
             # For now, use champion as fallback
             print("⚠️  model_uri not yet implemented, using champion")
-            model = get_cached_model(request.model_type, request.metric)
+            model, _ = get_cached_model(
+                request.model_type, request.metric, env=env, test_mode=test_mode
+            )  # Unpack tuple
             model_uri = "champion"  # Placeholder
         else:
             print(
                 f"🏆 Loading champion {request.model_type} model (metric={request.metric})"
             )
-            model = get_cached_model(request.model_type, request.metric)
+            model, _ = get_cached_model(
+                request.model_type, request.metric, env=env, test_mode=test_mode
+            )  # Unpack tuple
             model_uri = "champion"
 
         # Evaluate model
@@ -323,10 +393,6 @@ def monitor_endpoint(request: MonitorRequest):
         "output_html": "drift_report_20251029.html"
     }
 
-    TODO [Phase 4 - Prometheus]: Add Prometheus metrics
-          - prometheus_client.Gauge('evidently_drift_detected')
-          - prometheus_client.Gauge('evidently_drift_share')
-          - prometheus_client.Counter('evidently_drift_checks_total')
     """
     try:
         from evidently.report import Report
@@ -469,10 +535,6 @@ def monitor_endpoint(request: MonitorRequest):
         if drifted_features:
             print(f"   - Drifted features: {', '.join(drifted_features[:10])}")
 
-        # TODO: Push metrics to Prometheus (Phase 4)
-        # prometheus_client.Gauge('evidently_drift_detected').set(1 if drift_detected else 0)
-        # prometheus_client.Gauge('evidently_drift_share').set(drift_share)
-
         return {
             "status": "success",
             "drift_summary": {
@@ -492,3 +554,142 @@ def monitor_endpoint(request: MonitorRequest):
         print(f"❌ Drift detection failed: {str(e)}")
         print(traceback.format_exc())
         raise HTTPException(status_code=500, detail=f"Drift detection failed: {str(e)}")
+
+
+# === Schéma de requête pour promotion de champion ===
+class PromoteChampionRequest(BaseModel):
+    model_type: str  # "rf", "nn", or "rf_class"
+    run_id: str  # MLflow run_id to promote
+    env: str = "prod"
+    test_mode: bool = False
+
+
+# === Endpoint de promotion de champion ===
+@app.post("/promote_champion")
+def promote_champion_endpoint(request: PromoteChampionRequest):
+    """
+    Promote a specific model to champion status.
+
+    This endpoint is called by dag_monitor_and_train.py when the deployment
+    decision is "deploy". It updates summary.json to mark the challenger model
+    as the new champion, which will be used by subsequent /predict calls.
+
+    The promotion logic:
+    1. Demotes any existing champion (is_champion=False) for the same model_type/env/test_mode
+    2. Promotes the specified run_id to champion (is_champion=True)
+    3. Saves updated summary.json to GCS
+
+    Example request:
+    {
+        "model_type": "rf",
+        "run_id": "abc123def456",
+        "env": "prod",
+        "test_mode": false
+    }
+
+    Returns:
+    {
+        "status": "success",
+        "message": "Model rf run_id=abc123def456 promoted to champion"
+    }
+    """
+    try:
+        summary_path = "gs://df_traffic_cyclist1/models/summary.json"
+
+        print(f"🏆 Promoting {request.model_type} run_id={request.run_id} to champion")
+        print(
+            f"   env={request.env}, test_mode={request.test_mode}, summary_path={summary_path}"
+        )
+
+        demoted_run_id = promote_champion(
+            summary_path=summary_path,
+            model_type=request.model_type,
+            run_id=request.run_id,
+            env=request.env,
+            test_mode=request.test_mode,
+        )
+
+        # Clear model cache AND metadata cache to force reload of new champion on next /predict call
+        global model_cache, model_metadata_cache
+        # Cache key now includes env and test_mode
+        cache_key = (request.model_type, "r2", request.env, request.test_mode)
+        if cache_key in model_cache:
+            print(
+                f"🗑️  Clearing cache for {request.model_type} (env={request.env}, test_mode={request.test_mode})"
+            )
+            del model_cache[cache_key]
+
+            # 🆕 Also clear metadata cache
+            if cache_key in model_metadata_cache:
+                del model_metadata_cache[cache_key]
+                print(f"🗑️  Cleared metadata cache for {request.model_type}")
+
+            # Also clear the cache directory
+            cache_dir = get_cache_dir(request.model_type, "r2")
+            if os.path.exists(cache_dir):
+                shutil.rmtree(cache_dir)
+                print(f"🗑️  Cleared cache directory: {cache_dir}")
+
+        return {
+            "status": "success",
+            "message": f"Model {request.model_type} run_id={request.run_id} promoted to champion",
+            "promoted_run_id": request.run_id,
+            "demoted_run_id": demoted_run_id,
+        }
+
+    except ValueError as e:
+        print(f"❌ Promotion failed: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import traceback
+
+        print(f"❌ Promotion failed: {str(e)}")
+        print(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=f"Promotion failed: {str(e)}")
+
+
+# === Endpoint to get model registry summary ===
+@app.get("/model_summary")
+def get_model_summary_endpoint():
+    """
+    Get the full model registry summary.
+
+    Returns the complete list of all registered models with their metadata,
+    including which model is currently marked as champion (is_champion=True).
+
+    Used by dag_monitor_and_train.py to identify the current champion model
+    before validation.
+
+    Returns:
+        List of model metadata dictionaries with fields:
+        - model_type: str (rf, nn, etc.)
+        - run_id: str (MLflow run ID)
+        - env: str (prod, DEV, etc.)
+        - test_mode: bool
+        - is_champion: bool (True if this is the active champion)
+        - metrics: dict (r2, rmse, mae, etc.)
+        - timestamp: str (ISO format)
+    """
+    setup_credentials()
+
+    summary_path = os.getenv("MODEL_SUMMARY_PATH", "summary.json")
+    print(f"📂 Loading model registry summary from: {summary_path}")
+
+    try:
+        summary = get_full_summary(summary_path)
+        print(f"✅ Loaded {len(summary)} models from registry")
+        return summary
+
+    except FileNotFoundError:
+        print(f"⚠️ Summary file not found: {summary_path}")
+        raise HTTPException(
+            status_code=404, detail=f"Model summary not found at {summary_path}"
+        )
+    except Exception as e:
+        import traceback
+
+        print(f"❌ Failed to load model summary: {str(e)}")
+        print(traceback.format_exc())
+        raise HTTPException(
+            status_code=500, detail=f"Failed to load model summary: {str(e)}"
+        )

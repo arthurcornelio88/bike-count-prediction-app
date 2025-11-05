@@ -13,6 +13,7 @@ import os
 
 from utils.env_config import get_env_config
 from utils.bike_helpers import create_bq_dataset_if_not_exists
+from utils.discord_alerts import send_ingestion_success
 
 
 # Configuration
@@ -241,6 +242,9 @@ def fetch_bike_data_to_bq(**context):
 
     print(f"✅ Successfully appended {len(df_clean)} records to {full_table_id}")
     print("   Table is partitioned by date and clustered by compteur")
+
+    # Send Discord notification
+    send_ingestion_success(len(df_clean), full_table_id)
 
     # Push metadata to XCom for downstream tasks
     context["ti"].xcom_push(key="records_count", value=len(df_clean))

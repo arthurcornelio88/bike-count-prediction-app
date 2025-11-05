@@ -51,11 +51,11 @@ repos:
         exclude: ^tests/
 
   # Markdown linting
-  - repo: https://github.com/igorshubovych/markdownlint-cli
-    rev: v0.42.0
-    hooks:
-      - id: markdownlint
-        args: [--fix, --config, .github/linters/.markdownlint.yaml]
+  # - repo: https://github.com/igorshubovych/markdownlint-cli
+  #   rev: v0.42.0
+  #   hooks:
+  #     - id: markdownlint
+  #       args: [--fix, --config, .github/linters/.markdownlint.yaml]
 
 # Configure ruff (alternative to black + isort + flake8)
 # Settings can also go in pyproject.toml

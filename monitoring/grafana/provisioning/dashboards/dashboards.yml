@@ -1,0 +1,16 @@
+# Grafana Dashboard Auto-provisioning
+# Automatically import dashboards on Grafana startup
+
+apiVersion: 1
+
+providers:
+  - name: 'Bike Traffic MLOps Dashboards'
+    orgId: 1
+    folder: 'MLOps Monitoring'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false
