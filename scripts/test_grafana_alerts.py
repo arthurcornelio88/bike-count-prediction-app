@@ -114,6 +114,86 @@ def test_service_down():
     print("   Expected: 'Service Down' alert in 1min")
 
 
+def test_dag_too_slow():
+    """Test: DAG running too long (>3600s) alert"""
+    print("\n🧪 Test 8: DAG Too Slow (>3600s)")
+    registry = CollectorRegistry()
+    from prometheus_client import Histogram
+
+    # Create histogram and observe a value >3600s
+    dag_duration = Histogram(
+        "airflow_dag_run_duration_seconds",
+        "Mock DAG duration",
+        labelnames=("dag_id", "state"),
+        registry=registry,
+    )
+    dag_duration.labels(dag_id="monitor_and_fine_tune", state="running").observe(3700)
+    push_metrics(registry)
+    print(
+        "   Injected: airflow_dag_run_duration_seconds{dag_id='monitor_and_fine_tune'}=3700"
+    )
+    print("   Expected: 'DAG Running Too Long' alert in 10min")
+
+
+def test_dashboards():
+    """Test: Dashboard metrics (no alerts, visual verification only)"""
+    print("\n🧪 Test 9: Dashboard Metrics (visual verification)")
+    registry = CollectorRegistry()
+
+    # Drift metrics
+    Gauge("bike_drift_detected", "Mock drift detected", registry=registry).set(1)
+    Gauge(
+        "bike_drifted_features_count", "Mock drifted features", registry=registry
+    ).set(8)
+
+    # Training/deployment metrics
+    Gauge("bike_model_improvement_delta", "Mock improvement", registry=registry).set(
+        0.05
+    )
+    from prometheus_client import Counter
+
+    Counter(
+        "bike_model_deployments_total",
+        "Mock deployments",
+        labelnames=("decision",),
+        registry=registry,
+    ).labels(decision="deploy").inc()
+    Counter(
+        "bike_training_runs_total",
+        "Mock training runs",
+        labelnames=("status",),
+        registry=registry,
+    ).labels(status="success").inc()
+
+    # Prediction metrics
+    Gauge("bike_prediction_rmse", "Mock prediction RMSE", registry=registry).set(52.3)
+    Gauge("bike_prediction_mae", "Mock prediction MAE", registry=registry).set(38.7)
+    Gauge(
+        "bike_predictions_generated_total", "Mock predictions", registry=registry
+    ).set(450)
+
+    # Double eval metrics
+    Gauge(
+        "bike_model_r2_champion_baseline",
+        "Mock champion R² baseline",
+        registry=registry,
+    ).set(0.87)
+    Gauge(
+        "bike_model_r2_challenger_current",
+        "Mock challenger R² current",
+        registry=registry,
+    ).set(0.89)
+    Gauge(
+        "bike_model_r2_challenger_baseline",
+        "Mock challenger R² baseline",
+        registry=registry,
+    ).set(0.88)
+
+    push_metrics(registry)
+    print("   Injected: 11 dashboard-only metrics")
+    print("   Expected: Visual updates in Grafana dashboards (no alerts)")
+
+
 def restore_normal():
     """Restore all metrics to normal values"""
     print("\n🔄 Restoring normal values...")
@@ -147,6 +227,8 @@ def main():
             "api",
             "ingestion",
             "service",
+            "dag",
+            "dashboards",
             "restore",
         ],
         default="all",
@@ -176,6 +258,8 @@ def main():
         "api": test_api_error_rate,
         "ingestion": test_no_data_ingestion,
         "service": test_service_down,
+        "dag": test_dag_too_slow,
+        "dashboards": test_dashboards,
         "restore": restore_normal,
     }
 
