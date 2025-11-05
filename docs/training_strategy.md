@@ -528,6 +528,8 @@ def train_rf(X, y, current_data_df=None, window_months=6):
 
 ## Drift Management & Retraining Triggers
 
+![alt text](/docs/img/drif_discord.png)
+
 **Status**: Core feature (hybrid strategy implemented)
 
 ### The Challenge: New Bike Counters
