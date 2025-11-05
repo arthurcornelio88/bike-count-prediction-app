@@ -2,7 +2,7 @@ import os
 import json
 import uuid
 import tempfile
-from typing import Optional
+from typing import Optional, Any
 import datetime
 from urllib.request import urlopen
 from app.classes import RFPipeline, NNPipeline, AffluenceClassifierPipeline
@@ -132,6 +132,9 @@ def promote_champion(
         env: Environment (prod/dev)
         test_mode: Test mode flag
 
+    Returns:
+        demoted_run_id: The run_id of the previously demoted champion (None if no champion existed)
+
     Raises:
         ValueError: If run_id not found in summary
     """
@@ -174,6 +177,7 @@ def promote_champion(
 
     # Find the model to promote
     found = False
+    demoted_run_id = None
     for entry in summary:
         if (
             entry["model_type"] == model_type
@@ -188,6 +192,7 @@ def promote_champion(
                 # Demote other champions
                 if entry.get("is_champion", False):
                     entry["is_champion"] = False
+                    demoted_run_id = entry["run_id"]
                     print(f"⬇️ Demoted previous champion run_id={entry['run_id']}")
 
     if not found:
@@ -212,8 +217,36 @@ def promote_champion(
             json.dump(summary, f, indent=2)
         print(f"✅ Champion promotion saved locally : {summary_path}")
 
+    # Return demoted_run_id for logging
+    return demoted_run_id
+
 
 # === Chargement du meilleur modèle depuis le résumé
+def get_full_summary(summary_path: str) -> list[dict[str, Any]]:
+    """
+    Get the full model registry summary.
+
+    Args:
+        summary_path: Path to summary.json (gs:// or local)
+
+    Returns:
+        List of model metadata dictionaries
+    """
+    if summary_path.startswith("gs://"):
+        result = _read_gcs_json(summary_path)
+    elif summary_path.startswith("http"):
+        with urlopen(summary_path) as response:  # nosec B310
+            result = json.load(response)
+    else:
+        with open(summary_path, "r") as f:
+            result = json.load(f)
+
+    # Ensure we return a list
+    if isinstance(result, list):
+        return result
+    return [result]
+
+
 def get_best_model_from_summary(
     model_type: str,
     summary_path: str,
@@ -248,33 +281,37 @@ def get_best_model_from_summary(
         with open(summary_path, "r") as f:
             summary = json.load(f)
     print(f"⏳ Étape 1 – Lecture du résumé depuis {summary_path}")
-    print(
-        f"⏳ Étape 2 – Filtrage sur model_type={model_type}, env={env}, test_mode={test_mode}"
-    )
+    print(f"⏳ Étape 2 – Filtrage sur model_type={model_type}")
 
-    filtered = [
-        r
-        for r in summary
-        if r["model_type"] == model_type
-        and r["env"] == env
-        and r["test_mode"] == test_mode
-        # and r["rmse"] > 0  # éviter les modèles fictifs/perfectibles
-    ]
+    # Filter only by model_type (ignore env/test_mode - champion flag is what matters)
+    filtered = [r for r in summary if r["model_type"] == model_type]
 
     if not filtered:
-        raise RuntimeError(
-            f"Aucun modèle trouvé pour type={model_type}, env={env}, test_mode={test_mode}"
-        )
+        raise RuntimeError(f"Aucun modèle trouvé pour type={model_type}")
 
-    # Step 2.1: Check for promoted champion (is_champion=True)
+    # PRIORITY 1: Check for promoted champion (is_champion=True) - GLOBAL search
     champions = [r for r in filtered if r.get("is_champion", False)]
 
     if champions:
         print("🏆 Champion trouvé (is_champion=True), utilisation prioritaire")
-        best = champions[0]  # Should be only one, but take first if multiple
+        if len(champions) > 1:
+            print(f"⚠️  {len(champions)} champions trouvés, utilisation du premier")
+        best = champions[0]
     else:
-        # Fallback to metric-based selection
-        print(f"⚠️ Aucun champion promu, sélection par métrique {metric}")
+        # PRIORITY 2: Fallback to metric-based selection (filter by env/test_mode for backward compatibility)
+        print(
+            f"⚠️ Aucun champion promu, fallback: sélection par métrique {metric} (env={env}, test_mode={test_mode})"
+        )
+        filtered_fallback = [
+            r for r in filtered if r["env"] == env and r["test_mode"] == test_mode
+        ]
+
+        if not filtered_fallback:
+            print(
+                f"⚠️ Aucun modèle pour env={env}/test_mode={test_mode}, utilisation du meilleur global"
+            )
+            filtered_fallback = filtered
+
         metric_sorting = {
             "rmse": lambda r: -r["rmse"],
             "r2": lambda r: r["r2"],
@@ -285,7 +322,7 @@ def get_best_model_from_summary(
         if metric not in metric_sorting:
             raise ValueError(f"Métrique non supportée : {metric}")
 
-        best = max(filtered, key=metric_sorting[metric])
+        best = max(filtered_fallback, key=metric_sorting[metric])
     print(f"🔍 Résumé sélectionné:\n{json.dumps(best, indent=2)}")
     print(f"⏳ Étape 3 – Téléchargement depuis GCS : {best['model_uri']}")
 

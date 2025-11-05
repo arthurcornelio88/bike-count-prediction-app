@@ -1,7 +1,8 @@
 # Claude Code Project Instructions
 
-CRITICAL: Minimize token usage. Be extremely concise. No explanations unless
-asked.
+CRITICAL: Minimize token usage.
+Be extremely concise.
+No explanations unless asked.
 
 ## Code Attribution Policy
 

@@ -54,8 +54,10 @@ class RawCleanerTransformer(BaseEstimator, TransformerMixin):
         )
 
         # Conversion de la colonne datetime
+        # Use format='mixed' to handle both CSV (ISO with T) and BigQuery (space) formats
+        # This allows different date formats within the same column (required for sliding window)
         X["date_et_heure_de_comptage"] = pd.to_datetime(
-            X["date_et_heure_de_comptage"], utc=True
+            X["date_et_heure_de_comptage"], utc=True, format="mixed"
         ).dt.tz_convert("Europe/Paris")
 
         # Feature engineering

@@ -561,10 +561,12 @@ Our strategy combines **proactive** (preventive) and **reactive** (corrective) t
 **Thresholds:**
 
 ```python
-# Performance thresholds
-R2_CRITICAL = 0.65     # Below this → immediate action (reactive)
-R2_WARNING = 0.70      # Below this + high drift → preventive action (proactive)
-RMSE_THRESHOLD = 60.0  # Above this → immediate action
+# Performance thresholds (adjusted for production data distribution - 2025-11-05)
+# NOTE: Production R² on test_current is typically 0.50-0.60 (realistic for time-series with drift)
+# Baseline R² remains high (0.75-0.85) as reference
+R2_CRITICAL = 0.45     # Below this → immediate action (reactive)
+R2_WARNING = 0.55      # Below this + high drift → preventive action (proactive)
+RMSE_THRESHOLD = 90.0  # Above this → immediate action (was 60.0, adjusted for variance)
 
 # Drift thresholds
 DRIFT_CRITICAL = 0.5   # 50%+ drift share → critical level
@@ -595,14 +597,14 @@ if r2 < 0.65 or rmse > 60:
 
 **Example scenario:**
 
-- R² = 0.62 (below critical threshold)
+- R² = 0.42 (below critical threshold 0.45)
 - Drift = 40%
 - **Decision:** RETRAIN immediately
 
 #### Priority 2: PROACTIVE (High Drift + Declining)
 
 ```python
-if drift and drift_share >= 0.5 and r2 < 0.70:
+if drift and drift_share >= 0.5 and r2 < 0.55:
     return "fine_tune_model"
 ```
 
@@ -657,10 +659,10 @@ else:
 
 **Analysis:**
 
-1. Champion R² (0.72) is **above warning threshold** (0.70) ✅
-2. RMSE (32.25) is **well below threshold** (60) ✅
+1. Champion R² (0.56) is **above warning threshold** (0.55) ✅
+2. RMSE (82.4) is **below threshold** (90) ✅
 3. Drift share (50%) is **at critical level** ⚠️
-4. But metrics are **still good** on production data ✅
+4. But metrics are **still acceptable** on production data ✅
 
 **Decision:** **WAIT** (Priority 3)
 
@@ -821,6 +823,171 @@ gsutil cp data/new_train_baseline.csv \
 # Update Secret Manager reference
 gcloud secrets versions add train-data-path \
   --data-file=- <<< "gs://df_traffic_cyclist1/data/train_baseline.csv"
+```
+
+---
+
+## Champion Model Selection and Promotion
+
+### Overview
+
+The system uses a **champion/challenger architecture** where:
+- One model is designated as the **champion** (`is_champion=True`) and is loaded by the prediction API
+- The `is_champion` flag takes **priority over all other filters** (env, test_mode)
+- Champion promotion is explicit via the `/promote_champion` endpoint
+
+### Selection Priority Logic
+
+When loading models, the system follows this priority order:
+
+```python
+# PRIORITY 1: Global champion search (ignores env/test_mode)
+champions = [r for r in models if r.get("is_champion", False)]
+
+if champions:
+    return champions[0]  # Use promoted champion
+else:
+    # PRIORITY 2: Fallback to metric-based selection
+    filtered = [r for r in models if r["env"] == env and r["test_mode"] == test_mode]
+    return max(filtered, key=lambda x: x[metric])
+```
+
+**Key principle**: The champion flag represents a deliberate human decision and overrides automatic selection criteria.
+
+### Promotion Workflow
+
+#### 1. Training and Evaluation (DAG 3)
+
+```python
+# Train with sliding window (baseline + current_data)
+model = train_sliding_window(
+    baseline_data=train_baseline,
+    current_data=train_current,
+    env="DEV",
+    test_mode=True
+)
+
+# Double evaluation
+metrics_baseline = evaluate(model, test_baseline)  # Fixed reference
+metrics_current = evaluate(model, test_current)    # Current holdout
+
+# Log to MLflow with metadata
+mlflow.log_params({
+    "env": "DEV",
+    "test_mode": True,
+    "is_champion": False  # Not champion yet
+})
+```
+
+#### 2. Manual Promotion
+
+After reviewing metrics in MLflow UI or Airflow logs:
+
+```bash
+# Promote the new model as champion
+curl -X POST http://localhost:8001/promote_champion \
+  -H "Content-Type: application/json" \
+  -d '{
+    "run_id": "7fae3cd1234567890abcdef",
+    "model_type": "rf",
+    "env": "DEV",
+    "test_mode": true
+  }'
+```
+
+**What happens during promotion:**
+1. ✅ Previous champion's `is_champion` set to `False` (demotion)
+2. ✅ New model's `is_champion` set to `True`
+3. ✅ Model cache cleared to force reload
+4. ✅ Discord notification sent (if configured)
+
+#### 3. Automatic Loading (DAG 2)
+
+```python
+# Prediction API loads champion regardless of env/test_mode
+model, metadata = get_cached_model(
+    model_type="rf",
+    metric="r2",
+    env="prod",      # Ignored if champion exists
+    test_mode=False  # Ignored if champion exists
+)
+
+# Logs show:
+# 🏆 Champion trouvé (is_champion=True), utilisation prioritaire
+# 📦 Loaded model: run_id=7fae3cd... (is_champion=True)
+```
+
+### Environment Variables (docker-compose.yaml)
+
+```yaml
+fastapi_app:
+  environment:
+    - MODEL_ENV=dev        # Fallback filter (if no champion)
+    - MODEL_TEST_MODE=false # Fallback filter (if no champion)
+```
+
+**Important**: These variables define the **fallback** behavior when no champion exists. Once a champion is promoted, these are ignored.
+
+### Example Scenario
+
+```text
+Initial State:
+├── Model A: env=prod, test_mode=False, is_champion=False, R²=0.72
+├── Model B: env=DEV,  test_mode=True,  is_champion=False, R²=0.75
+└── Model C: env=DEV,  test_mode=True,  is_champion=False, R²=0.78
+
+# System loads Model A (best match for env=prod, test_mode=False)
+
+After promoting Model C:
+├── Model A: env=prod, test_mode=False, is_champion=False, R²=0.72
+├── Model B: env=DEV,  test_mode=True,  is_champion=False, R²=0.75
+└── Model C: env=DEV,  test_mode=True,  is_champion=True,  R²=0.78 ⭐
+
+# System now loads Model C (champion flag takes priority)
+# Even though docker-compose has MODEL_ENV=prod, MODEL_TEST_MODE=false
+```
+
+### Best Practices
+
+1. **Training Phase**: Always use `env=DEV, test_mode=True` for experimental training
+2. **Evaluation Phase**: Review both `test_baseline` and `test_current` metrics before promotion
+3. **Promotion Decision**: Promote based on:
+   - Improved R² on test_current (production-like data)
+   - Stable or improved R² on test_baseline (consistency check)
+   - Acceptable RMSE for business requirements
+4. **Demotion**: The system automatically demotes the previous champion (`is_champion=False`)
+5. **Rollback**: If issues occur, re-promote the previous model using its `run_id`
+
+### API Reference
+
+#### POST `/promote_champion`
+
+Promotes a trained model to champion status.
+
+**Request Body:**
+```json
+{
+  "run_id": "7fae3cd1234567890abcdef",
+  "model_type": "rf",
+  "env": "DEV",
+  "test_mode": true
+}
+```
+
+**Response:**
+```json
+{
+  "status": "success",
+  "message": "Champion promoted",
+  "promoted_run_id": "7fae3cd1234567890abcdef",
+  "demoted_run_id": "661ce9876543210fedcba",
+  "metadata": {
+    "model_type": "rf",
+    "env": "DEV",
+    "test_mode": true,
+    "is_champion": true
+  }
+}
 ```
 
 ---

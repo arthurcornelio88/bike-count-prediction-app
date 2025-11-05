@@ -12,7 +12,6 @@
 - [Architecture Overview](#architecture-overview)
 - [Metrics Sources](#metrics-sources)
 - [Configuration](#configuration)
-- [Screenshots](#screenshots)
 - [Troubleshooting](#troubleshooting)
 
 ---
@@ -266,30 +265,6 @@ monitoring/grafana/provisioning/
 
 ---
 
-## 📸 Screenshots
-
-> **Note**: Add your Grafana/Discord screenshots to `docs/monitoring/screenshots/`
-
-### Recommended Screenshots
-
-1. **`grafana_overview_dashboard.png`**
-   - Main dashboard with all key metrics
-   - Show R² = 0.867, RMSE = 66.66
-
-2. **`grafana_alert_rules.png`**
-   - Alerting → Alert Rules
-   - Show 9 rules, state (Normal/Pending/Firing)
-
-3. **`discord_notifications.png`**
-   - Discord channel with alert examples
-   - Different severity levels (critical/warning/info)
-
-4. **`prometheus_targets.png`**
-   - Status → Targets
-   - All 3 jobs UP (regmodel-api, airflow-metrics, prometheus)
-
----
-
 ## 🔧 Troubleshooting
 
 ### No metrics in Grafana
@@ -388,25 +363,6 @@ curl -X POST "$DISCORD_WEBHOOK_URL" \
   -H "Content-Type: application/json" \
   -d '{"content": "Test from Grafana"}'
 ```
-
----
-
-### WSL2-specific issues
-
-**Issue**: DAGs not visible in Airflow UI after host restart
-
-**Cause**: WSL2 bind mount bug (files show empty)
-
-**Fix**:
-
-```bash
-# Restart Airflow services
-docker compose restart airflow-webserver airflow-scheduler airflow-worker
-
-# Wait 30s, refresh UI
-```
-
-See [troubleshooting_wsl2_docker.md](../troubleshooting_wsl2_docker.md) for details.
 
 ---
 

@@ -37,23 +37,26 @@ See [TESTING_ALERTS.md](./TESTING_ALERTS.md) for full details.
 
 ---
 
-## Dashboard 1: MLOps - Overview
+## Dashboard 1: MLOps - System Overview
 
 **UID**: `mlops-overview` | **Refresh**: 10s | **Time**: Last 6h
+
+![alt text](/docs/img/dash_1.png)
 
 **Panels**:
 
 | Panel | Metric | Threshold | Purpose |
 |-------|--------|-----------|---------|
-| Drift Detected | `max_over_time(bike_drift_detected[15m])` | 0=ok, 1=drift | Binary drift indicator |
-| Drift Share (%) | `bike_drift_share * 100` | <30% ok, >50% critical | % of drifted features |
-| Champion R² (test_current) | `bike_model_r2_champion_current` | >0.70 ideal, <0.65 alert | Current model health |
-| Services Status | `up{job="..."}` | 1=UP | Prometheus/API/exporter availability |
-| API Request Rate | `rate(fastapi_requests_total[5m])` | ~0.1 req/s | Load per endpoint |
-| API Error Rate | `rate(fastapi_errors_total[5m])` | >5% critical | 5xx error % |
-| Records Ingested | `increase(bike_records_ingested_total[1h])` | 0=blocked | Hourly ingestion volume |
-| Predictions Generated | `increase(bike_predictions_generated_total[1h])` | Should match ingestion | Hourly prediction volume |
-| Production RMSE | `bike_model_rmse_production` | Sudden rise=drift | Absolute error of champion |
+| Drift Detected | `bike_drift_detected{instance="$instance"}` | 0=ok, 1=drift | Binary drift indicator (gauge) |
+| Drift Share (%) | `bike_drift_share{instance="$instance"} * 100` | <30% ok, >50% critical | % of drifted features (gauge) |
+| Champion R² (test_current) | `bike_model_r2_champion_current{instance="$instance"}` | >0.70 ideal, <0.65 alert | Current model health (gauge) |
+| Services Status | `up{job="airflow-metrics"}` (+ FastAPI, Prometheus) | 1=UP | Service availability (timeseries) |
+| API Request Rate (req/sec) | `rate(fastapi_requests_total[5m])` | ~0.1 req/s | Load per endpoint (timeseries) |
+| API Error Rate (%) | `100 * sum(rate(fastapi_errors_total[5m])) / sum(rate(...))` | >5% critical | 5xx error % (timeseries) |
+| Records Ingested | `bike_records_ingested_total{instance="$instance"}` | 0=blocked | Total ingestion volume (stat) |
+| Predictions Generated | `bike_predictions_generated_total{instance="$instance"}` | Should match ingestion | Total prediction volume (stat) |
+| Drifted Features | `bike_drifted_features_count{instance="$instance"}` | Monitor trend | Count of drifted features (stat) |
+| Production RMSE | `bike_model_rmse_production{instance="$instance"}` | Sudden rise=drift | Absolute error of champion (stat) |
 
 **Quick health check**: All services UP, R²≥0.70, drift<30%, API error rate=0.
 
@@ -62,6 +65,8 @@ See [TESTING_ALERTS.md](./TESTING_ALERTS.md) for full details.
 ## Dashboard 2: MLOps - Model Performance
 
 **UID**: `mlops-model-performance` | **Refresh**: 30s | **Time**: Last 24h
+
+![alt text](/docs/img/dash_2.png)
 
 **Panels**:
 
@@ -95,15 +100,18 @@ See [TESTING_ALERTS.md](./TESTING_ALERTS.md) for full details.
 
 **UID**: `mlops-drift-monitoring` | **Refresh**: 30s | **Time**: Last 7d
 
+![alt text](/docs/img/dash_3.png)
+
 **Panels**:
 
 | Panel | Metric | Threshold | Purpose |
 |-------|--------|-----------|---------|
-| Data Drift Over Time | `bike_drift_share * 100` | <30% ok, >50% critical | Drift % evolution |
-| Drift Status (gauge) | `bike_drift_detected` | 0=NO, 1=YES | Current drift state |
-| Drifted Features Count | `bike_drifted_features_count` | Monitor trend | Number of features with drift |
-| Current Drift Share (gauge) | `bike_drift_share * 100` | 0-100% | Current drift percentage |
-| R² vs Drift Correlation | `bike_model_r2_champion_current` vs `bike_drift_share` | See correlation | How drift affects model |
+| Data Drift Over Time | `bike_drift_share{instance="$instance"} * 100` | <30% ok, >50% critical | Drift % evolution (timeseries) |
+| Drift Status | `bike_drift_detected{instance="$instance"}` | 0=NO, 1=YES | Current drift state (gauge) |
+| Drifted Features Count | `bike_drifted_features_count{instance="$instance"}` | Monitor trend | Number of features with drift (timeseries) |
+| Current Drift Share | `bike_drift_share{instance="$instance"} * 100` | 0-100% | Current drift percentage (gauge) |
+| R² vs Drift Correlation | `bike_model_r2_champion_current` vs `bike_drift_share` | See correlation | How drift affects model (timeseries) |
+| Summary Statistics | `bike_drifted_features_count{instance="$instance"}` | Info panel | Latest drift metrics (stat) |
 
 **Usage**: Track data drift and its impact on model quality. Drift >50% + R² declining → retrain urgently.
 
@@ -111,7 +119,9 @@ See [TESTING_ALERTS.md](./TESTING_ALERTS.md) for full details.
 
 ## Dashboard 4: MLOps - Training & Deployment
 
-**UID**: `mlops-training-deployment` | **Refresh**: 1m | **Time**: Last 7d
+**UID**: `mlops-training-deployment` | **Refresh**: 1m | **Time**: Last 3h
+
+![alt text](/docs/img/dash_4.png)
 
 **Panels**:
 
@@ -231,26 +241,26 @@ bike_model_deployments_total{decision="reject"}
 
 ## Metric Sources
 
-| Metric | Source DAG | Description |
-|--------|------------|-------------|
-| `bike_model_r2_champion_current` | `dag_monitor_and_train` | Champion evaluated on test_current (recent data) |
-| `bike_model_r2_champion_baseline` | `dag_monitor_and_train` | Champion evaluated on test_baseline (reference set) |
-| `bike_model_r2_challenger_current` | `dag_monitor_and_train` | Challenger evaluated on test_current |
-| `bike_model_r2_challenger_baseline` | `dag_monitor_and_train` | Challenger evaluated on test_baseline |
-| `bike_model_rmse_production` | `dag_monitor_and_train` | Champion RMSE on weekly validation |
-| `bike_prediction_rmse` | `dag_daily_prediction` | Daily predictions RMSE |
-| `bike_prediction_mae` | `dag_daily_prediction` | Daily predictions MAE |
-| `bike_drift_detected` | `dag_monitor_and_train` | Binary drift indicator (0/1) |
-| `bike_drift_share` | `dag_monitor_and_train` | Ratio of drifted features (0-1) |
-| `bike_drifted_features_count` | `dag_monitor_and_train` | Count of drifted features |
-| `bike_model_improvement_delta` | `dag_monitor_and_train` | R² gain from training |
-| `bike_training_runs_total` | `dag_monitor_and_train` | Training runs counter |
-| `bike_model_deployments_total` | `dag_monitor_and_train` | Deployment decisions counter |
-| `bike_records_ingested_total` | `dag_daily_fetch_data` | Records ingested counter |
-| `bike_predictions_generated_total` | `dag_daily_prediction` | Predictions generated counter |
-| `fastapi_requests_total` | FastAPI middleware | HTTP requests counter |
-| `fastapi_errors_total` | FastAPI middleware | HTTP 5xx errors counter |
-| `fastapi_request_duration_seconds` | FastAPI middleware | Request latency histogram |
+| Metric | Source DAG | Task | Description |
+|--------|------------|------|-------------|
+| `bike_model_r2_champion_current` | `dag_monitor_and_train` | `validate_new_champion` or `validate_model` | Champion R² on production data (uses NEW champion metrics if promotion, else OLD champion) |
+| `bike_model_r2_champion_baseline` | `dag_monitor_and_train` | `fine_tune_model` | Champion R² on test_baseline (reference set) from training double evaluation |
+| `bike_model_r2_challenger_current` | `dag_monitor_and_train` | `fine_tune_model` | Challenger R² on test_current from training double evaluation |
+| `bike_model_r2_challenger_baseline` | `dag_monitor_and_train` | `fine_tune_model` | Challenger R² on test_baseline from training double evaluation |
+| `bike_model_rmse_production` | `dag_monitor_and_train` | `validate_new_champion` or `validate_model` | Champion RMSE on production data (uses NEW champion if promotion, else OLD champion) |
+| `bike_prediction_rmse` | `dag_daily_prediction` | `predict_daily_data` | Daily predictions RMSE |
+| `bike_prediction_mae` | `dag_daily_prediction` | `predict_daily_data` | Daily predictions MAE |
+| `bike_drift_detected` | `dag_monitor_and_train` | `monitor_drift` | Binary drift indicator (0/1) |
+| `bike_drift_share` | `dag_monitor_and_train` | `monitor_drift` | Ratio of drifted features (0-1) |
+| `bike_drifted_features_count` | `dag_monitor_and_train` | `monitor_drift` | Count of drifted features |
+| `bike_model_improvement_delta` | `dag_monitor_and_train` | `fine_tune_model` | R² gain from training (challenger - old champion) |
+| `bike_training_runs_total` | `dag_monitor_and_train` | `fine_tune_model` | Training runs counter (status=success/failed) |
+| `bike_model_deployments_total` | `dag_monitor_and_train` | `fine_tune_model` | Deployment decisions counter (decision=deploy/skip/reject) |
+| `bike_records_ingested_total` | `dag_daily_fetch_data` | `fetch_to_bigquery` | Records ingested counter |
+| `bike_predictions_generated_total` | `dag_daily_prediction` | `predict_daily_data` | Predictions generated counter |
+| `fastapi_requests_total` | FastAPI middleware | (instrumentation) | HTTP requests counter |
+| `fastapi_errors_total` | FastAPI middleware | (instrumentation) | HTTP 5xx errors counter |
+| `fastapi_request_duration_seconds` | FastAPI middleware | (instrumentation) | Request latency histogram |
 
 ---
 

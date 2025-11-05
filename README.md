@@ -444,7 +444,7 @@ Built with ❤️ by:
 - [Arthur Cornélio](https://github.com/arthurcornelio88)
 - [Ibtihel Nemri](https://github.com/ibtihelnemri)
 - [Bruno Happi](https://github.com/brunoCo-de)
-- [Laurène Attia](https://github.com/laureneattia)
+- [Laurène Attia](https://github.com/laureneatt)
 
 ---
 

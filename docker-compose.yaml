@@ -60,10 +60,19 @@ services:
     environment:
       - MLFLOW_TRACKING_URI=http://mlflow:5000
       - GOOGLE_APPLICATION_CREDENTIALS=/app/gcp.json
+      - MODEL_ENV=dev  # Which environment models to load: "dev" or "prod"
+      - MODEL_TEST_MODE=false  # Which test_mode models to load: "true" or "false"
+      - MODEL_SUMMARY_PATH=gs://df_traffic_cyclist1/models/summary.json  # Path to model registry summary
     volumes:
       - ./backend/regmodel/app:/app/app  # Mount only app code for hot reload
       - ./mlflow-trainer.json:/app/gcp.json:ro
-      - ./data:/app/data:ro
+      # Mount only essential CSV files (exclude 2.8GB of unused raw data)
+      - ./data/train_baseline.csv:/app/data/train_baseline.csv:ro
+      - ./data/test_baseline.csv:/app/data/test_baseline.csv:ro
+      - ./data/test_sample.csv:/app/data/test_sample.csv:ro
+      - ./data/reference_data.csv:/app/data/reference_data.csv:ro
+      - ./data/reference_data_sample.csv:/app/data/reference_data_sample.csv:ro
+      - ./data/current_data.csv:/app/data/current_data.csv:ro
     depends_on:
       - mlflow
     deploy:
