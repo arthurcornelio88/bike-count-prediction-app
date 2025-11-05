@@ -256,10 +256,34 @@ Schema:
 comptage_horaire              INTEGER   - Actual value (if available)
 prediction                    FLOAT     - Model prediction
 model_type                    STRING    - Model used (rf/nn)
-model_version                 STRING    - Model run_id from MLflow
+model_version                 STRING    - Champion model run_id from MLflow (for traceability)
 prediction_ts                 TIMESTAMP - When prediction was made
 identifiant_du_compteur       STRING    - Counter ID
 date_et_heure_de_comptage     TIMESTAMP - Data timestamp
+```
+
+**Champion Tracking** (Phase 5 - MLOps Monitoring):
+
+Every prediction is now tagged with the exact champion model that produced it:
+
+- The `/predict` API returns model metadata including `run_id`, `is_champion`, `r2`, and `rmse`
+- The `model_version` field stores the champion's MLflow `run_id` (instead of a timestamp)
+- This enables full traceability from prediction → model version → training metrics
+- Champion metadata is also pushed to XCom for audit purposes
+
+Example API response:
+
+```json
+{
+  "predictions": [123.4, 234.5, ...],
+  "model_metadata": {
+    "run_id": "849e4ce4402dd7dba3e94f1888663304",
+    "is_champion": true,
+    "model_type": "rf",
+    "r2": 0.9087,
+    "rmse": 32.25
+  }
+}
 ```
 
 ![alt text](/docs/img/predictions_bq.png)
@@ -484,7 +508,7 @@ Invokes the FastAPI `/train` endpoint with `data_source="baseline"` and optional
   - Current distribution: +18.72% improvement
   - Baseline distribution: +50.70% improvement
 
-**Champion Promotion Flow**:
+**Champion Promotion Flow** (Phase 5 - MLOps Monitoring):
 
 When deployment decision contains "deploy", the DAG automatically promotes the new model:
 
@@ -492,10 +516,38 @@ When deployment decision contains "deploy", the DAG automatically promotes the n
 2. FastAPI updates `summary.json` in GCS:
    - Sets `is_champion=true` for new model
    - Sets `is_champion=false` for previous champion
-3. Clears FastAPI model cache to force reload
-4. Next `/predict` call loads new champion via `get_best_model_from_summary()`
+3. Clears FastAPI model cache (both model and metadata) to force reload
+4. Sends Discord notification with champion details (run_id, R² scores, improvement delta)
+5. Next `/predict` call loads new champion via `get_best_model_from_summary()`
 
-This ensures `dag_daily_prediction` automatically uses the promoted model without manual intervention.
+**Discord Notification**:
+
+When a new champion is promoted, the team receives a Discord alert with:
+
+- Model type and run_id (first 12 chars)
+- R² scores on both test_current and test_baseline
+- Improvement delta over previous champion
+- RMSE metric
+
+Example Discord notification:
+
+```text
+🏆 Champion Model Promoted
+
+🏆 NEW CHAMPION PROMOTED to production!
+
+Impact: All future predictions will use this new model.
+The model has been validated against both recent and baseline test sets.
+
+Model Type: rf
+Run ID: 849e4ce4402d
+Improvement: +0.1872
+R² (current): 0.9087
+R² (baseline): 0.8161
+RMSE: 32.25
+```
+
+This ensures `dag_daily_prediction` automatically uses the promoted model without manual intervention, and the team is immediately aware of production model changes.
 
 ![fine_tune_model screenshot](/docs/img/dag3_finetuning2.png)
 
