@@ -22,6 +22,7 @@ from utils.discord_alerts import (
     send_performance_alert,
     send_training_success,
     send_training_failure,
+    send_champion_promotion_alert,
 )
 
 
@@ -618,6 +619,17 @@ def fine_tune_model(**context):
                     print(f"   Run ID: {result.get('run_id')}")
                     print(f"   Decision: {decision}")
                     context["ti"].xcom_push(key="champion_promoted", value=True)
+
+                    # 🆕 Send Discord notification for champion promotion
+                    print("📢 Sending Discord notification for champion promotion...")
+                    send_champion_promotion_alert(
+                        model_type="rf",
+                        run_id=result.get("run_id", "unknown"),
+                        r2_current=r2_current,
+                        r2_baseline=r2_baseline,
+                        improvement_delta=r2_improvement_current,
+                        rmse=metrics_current.get("rmse"),
+                    )
                 else:
                     print(
                         f"⚠️ Champion promotion failed: {promote_response.status_code}"

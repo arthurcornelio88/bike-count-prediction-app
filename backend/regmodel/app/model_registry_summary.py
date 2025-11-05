@@ -221,7 +221,24 @@ def get_best_model_from_summary(
     metric: str = "rmse",
     test_mode: Optional[bool] = False,
     download_dir: Optional[str] = None,  # 🔧 NOUVEAU
+    return_metadata: bool = False,  # 🆕 Option to return (model, metadata) tuple
 ):
+    """
+    Get the best model from summary.json.
+
+    Args:
+        model_type: Type of model (rf, nn, rf_class)
+        summary_path: Path to summary.json (gs:// or local)
+        env: Environment (prod/dev)
+        metric: Metric for selection (r2, rmse, etc.)
+        test_mode: Test mode flag
+        download_dir: Optional download directory
+        return_metadata: If True, returns (model, metadata) tuple
+
+    Returns:
+        If return_metadata=False: model object
+        If return_metadata=True: (model, metadata_dict) tuple
+    """
     if summary_path.startswith("gs://"):
         summary = _read_gcs_json(summary_path)
     elif summary_path.startswith("http"):
@@ -295,13 +312,29 @@ def get_best_model_from_summary(
         print(f"📂 Contenu détecté : {os.listdir(local_model_path)}")
 
     if model_type == "rf":
-        return RFPipeline.load(local_model_path)
+        model = RFPipeline.load(local_model_path)
     elif model_type == "nn":
-        return NNPipeline.load(local_model_path)
+        model = NNPipeline.load(local_model_path)
     elif model_type == "rf_class":
-        return AffluenceClassifierPipeline.load(local_model_path)
+        model = AffluenceClassifierPipeline.load(local_model_path)
     else:
         raise ValueError("Type de modèle non reconnu")
+
+    # Return model with or without metadata
+    if return_metadata:
+        metadata = {
+            "run_id": best.get("run_id"),
+            "is_champion": best.get("is_champion", False),
+            "model_type": best.get("model_type"),
+            "model_uri": best.get("model_uri"),
+            "env": best.get("env"),
+            "r2": best.get("r2"),
+            "rmse": best.get("rmse"),
+            "timestamp": best.get("timestamp"),
+        }
+        return model, metadata
+    else:
+        return model
 
 
 # === Téléchargement GCS vers temp directory

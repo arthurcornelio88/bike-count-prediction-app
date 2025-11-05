@@ -412,6 +412,53 @@ def send_training_failure(error_message: str, dag_run_id: str) -> bool:
     )
 
 
+def send_champion_promotion_alert(
+    model_type: str,
+    run_id: str,
+    r2_current: float,
+    r2_baseline: float,
+    improvement_delta: float,
+    rmse: float = None,
+) -> bool:
+    """
+    Notify when a new model is promoted to champion (INFO level).
+
+    Args:
+        model_type: Type of model (rf, nn, rf_class)
+        run_id: MLflow run_id of promoted model
+        r2_current: R² score on test_current (recent data)
+        r2_baseline: R² score on test_baseline (reference set)
+        improvement_delta: R² improvement over previous champion
+        rmse: Optional RMSE metric
+
+    Returns:
+        bool: True if sent successfully
+    """
+    description = (
+        "🏆 NEW CHAMPION PROMOTED to production!\n\n"
+        "**Impact**: All future predictions will use this new model. "
+        "The model has been validated against both recent and baseline test sets."
+    )
+
+    fields = [
+        {"name": "Model Type", "value": model_type, "inline": True},
+        {"name": "Run ID", "value": run_id[:12], "inline": True},
+        {"name": "Improvement", "value": f"+{improvement_delta:.4f}", "inline": True},
+        {"name": "R² (current)", "value": f"{r2_current:.4f}", "inline": True},
+        {"name": "R² (baseline)", "value": f"{r2_baseline:.4f}", "inline": True},
+    ]
+
+    if rmse is not None:
+        fields.append({"name": "RMSE", "value": f"{rmse:.2f}", "inline": True})
+
+    return send_discord_message(
+        title="🏆 Champion Model Promoted",
+        description=description,
+        color=0x00D1FF,  # Bright blue
+        fields=fields,
+    )
+
+
 # ============================================================================
 # Infrastructure Alerts (CRITICAL)
 # ============================================================================

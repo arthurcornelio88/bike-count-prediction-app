@@ -174,6 +174,19 @@ def run_daily_prediction(**context):
 
         print(f"✅ Received {len(predictions)} predictions from API")
 
+        # 🆕 Extract champion metadata from API response
+        model_metadata = result.get("model_metadata", {})
+        champion_run_id = model_metadata.get("run_id", "unknown")
+        is_champion = model_metadata.get("is_champion", False)
+        model_r2 = model_metadata.get("r2")
+        model_rmse = model_metadata.get("rmse")
+
+        print(
+            f"🏆 Champion model used: run_id={champion_run_id}, is_champion={is_champion}"
+        )
+        if model_r2 is not None and model_rmse is not None:
+            print(f"   Model metrics: R²={model_r2:.4f}, RMSE={model_rmse:.2f}")
+
     except requests.exceptions.Timeout:
         # Discord notification for timeout
         send_prediction_failure("Prediction API timeout (>5 minutes)")
@@ -186,7 +199,9 @@ def run_daily_prediction(**context):
     # 3️⃣ Prepare predictions DataFrame
     df["prediction"] = predictions
     df["model_type"] = "rf"
-    df["model_version"] = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    df["model_version"] = (
+        champion_run_id  # 🆕 Store champion run_id instead of timestamp
+    )
     df["prediction_ts"] = datetime.utcnow()
 
     # Select relevant columns for predictions table
@@ -259,6 +274,14 @@ def run_daily_prediction(**context):
     # Push metadata to XCom
     context["ti"].xcom_push(key="predictions_count", value=len(df_pred))
     context["ti"].xcom_push(key="pred_table", value=full_pred_table)
+
+    # 🆕 Push champion model metadata to XCom
+    context["ti"].xcom_push(key="champion_run_id", value=champion_run_id)
+    context["ti"].xcom_push(key="champion_is_champion", value=is_champion)
+    if model_r2 is not None:
+        context["ti"].xcom_push(key="champion_r2", value=float(model_r2))
+    if model_rmse is not None:
+        context["ti"].xcom_push(key="champion_rmse", value=float(model_rmse))
 
 
 def validate_predictions(**context):

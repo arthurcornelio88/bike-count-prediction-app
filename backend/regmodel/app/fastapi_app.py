@@ -43,8 +43,9 @@ def setup_credentials():
     print("✅ Credentials injectés via GCP_JSON_CONTENT")
 
 
-# === Cache global des modèles ===
+# === Cache global des modèles et métadonnées ===
 model_cache = {}
+model_metadata_cache = {}  # 🆕 Cache for model metadata (run_id, is_champion, etc.)
 
 
 # === Fonction utilitaire de cache avec nettoyage ===
@@ -57,6 +58,12 @@ def get_cache_dir(model_type: str, metric: str) -> str:
 
 
 def get_cached_model(model_type: str, metric: str):
+    """
+    Get cached model and metadata.
+
+    Returns:
+        tuple: (model, metadata_dict) where metadata includes run_id, is_champion, etc.
+    """
     key = (model_type, metric)
     if key not in model_cache:
         cache_dir = get_cache_dir(model_type, metric)
@@ -67,15 +74,19 @@ def get_cached_model(model_type: str, metric: str):
 
         os.makedirs(cache_dir, exist_ok=True)
 
-        model = get_best_model_from_summary(
+        # 🆕 Request model WITH metadata
+        model, metadata = get_best_model_from_summary(  # type: ignore[call-arg]
             model_type=model_type,
             metric=metric,
             summary_path="gs://df_traffic_cyclist1/models/summary.json",
             env="prod",
             download_dir=cache_dir,  # ← Important pour contrôler le chemin
+            return_metadata=True,  # 🆕 Get metadata along with model
         )
         model_cache[key] = model
-    return model_cache[key]
+        model_metadata_cache[key] = metadata  # 🆕 Cache metadata separately
+
+    return model_cache[key], model_metadata_cache[key]
 
 
 # === Chargement anticipé au démarrage ===
@@ -104,10 +115,23 @@ def predict(data: PredictRequest):
     df = pd.DataFrame(data.records)
 
     try:
-        model = get_cached_model(data.model_type, data.metric)
+        model, metadata = get_cached_model(
+            data.model_type, data.metric
+        )  # 🆕 Get metadata too
         y_pred = model.predict_clean(df)
         predictions = y_pred.tolist()
-        return {"predictions": predictions}
+
+        # 🆕 Return predictions WITH champion metadata
+        return {
+            "predictions": predictions,
+            "model_metadata": {
+                "run_id": metadata.get("run_id"),
+                "is_champion": metadata.get("is_champion", False),
+                "model_type": metadata.get("model_type"),
+                "r2": metadata.get("r2"),
+                "rmse": metadata.get("rmse"),
+            },
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -551,12 +575,17 @@ def promote_champion_endpoint(request: PromoteChampionRequest):
             test_mode=request.test_mode,
         )
 
-        # Clear model cache to force reload of new champion on next /predict call
-        global model_cache
+        # Clear model cache AND metadata cache to force reload of new champion on next /predict call
+        global model_cache, model_metadata_cache
         cache_key = (request.model_type, "r2")  # Assuming r2 is primary metric
         if cache_key in model_cache:
             print(f"🗑️  Clearing cache for {request.model_type} to reload new champion")
             del model_cache[cache_key]
+
+            # 🆕 Also clear metadata cache
+            if cache_key in model_metadata_cache:
+                del model_metadata_cache[cache_key]
+                print(f"🗑️  Cleared metadata cache for {request.model_type}")
 
             # Also clear the cache directory
             cache_dir = get_cache_dir(request.model_type, "r2")
