@@ -31,7 +31,7 @@ curl -X POST 'http://localhost:8000/predict' \
   -H "Content-Type: application/json" \
   -d '{"records": [{"nom_du_compteur": "35 boulevard de Ménilmontant NO-SE", "date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00", "coordonnées_géographiques": "48.8672, 2.3501", "mois_annee_comptage": "mai 2025"}], "model_type": "nn", "metric": "r2"}'
 ```
-**Note**: ClassModel et RegModel partagent le même endpoint ; seuls leurs ports locaux diffèrent : 8080 pour ClassModel, 8000 pour RegModel.
+**Note:** ClassModel et RegModel partagent le même endpoint ; seuls leurs ports locaux diffèrent : 8080 pour ClassModel, 8000 pour RegModel.
 ---
 
 ## ☁️ Déploiement en production (GCP Cloud Run)
@@ -93,7 +93,7 @@ gcloud run deploy regmodel-api \
   --update-secrets=GCP_JSON_CONTENT=gcp-service-account:latest
 ```
 
-**Note :** L’API ClassModel suit le même processus que RegModel ; seul le port local diffère (8080 pour ClassModel, 8000 pour RegModel).
+**Note:** L'API ClassModel suit le même processus que RegModel ; seul le port local diffère (8080 pour ClassModel, 8000 pour RegModel).
 ---
 
 ## 🌐 Endpoints en production
