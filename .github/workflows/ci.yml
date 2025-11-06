@@ -2,7 +2,7 @@ name: MLOps CI Tests
 
 on:
   push:
-    branches: [feat/*, master, main]
+    branches: [feat/*, v2.0.0, master, main]
   pull_request:
     branches: [master, main]
 
