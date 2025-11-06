@@ -420,6 +420,9 @@ See [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) for video presentation guide:
 - [docs/architecture.md](docs/architecture.md) - MLflow & model registry
 - [docs/dags.md](docs/dags.md) - Airflow DAG reference (3 DAGs)
 
+### Infrastructure
+- [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) - Complete infrastructure documentation (Docker services, GCP, external APIs)
+
 ### Setup Guides
 - [docs/mlflow_cloudsql.md](docs/mlflow_cloudsql.md) - MLflow Cloud SQL setup
 - [docs/bigquery_setup.md](docs/bigquery_setup.md) - BigQuery pipeline
