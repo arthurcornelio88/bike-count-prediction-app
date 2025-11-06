@@ -8,13 +8,13 @@
 
 ## 📋 Table of Contents
 
-- [Quick Start](#quick-start)
-- [Architecture Overview](#architecture-overview)
-- [Metrics Sources](#metrics-sources)
-- [Configuration](#configuration)
-- [Troubleshooting](#troubleshooting)
-- [Maintenance](#maintenance)
-- [Related Documentation](#related-documentation)
+- [🚀 Quick Start](#quick-start)
+- [🏗️ Architecture Overview](#architecture-overview)
+- [📊 Metrics Sources](#metrics-sources)
+- [⚙️ Configuration](#configuration)
+- [🔧 Troubleshooting](#troubleshooting)
+- [📚 Related Documentation](#related-documentation)
+- [🔄 Maintenance](#maintenance)
 ---
 
 ## 🚀 Quick Start
