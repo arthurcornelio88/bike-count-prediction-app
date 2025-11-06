@@ -608,9 +608,21 @@ def fine_tune_model(**context):
         print(f"   - RMSE: {metrics_current.get('rmse', 0):.2f}")
         print(f"   - MAE: {metrics_current.get('mae', 0):.2f}")
 
-        print("\n📊 Training Metrics (on train_baseline):")
-        print(f"   - R²: {r2_train:.4f}")
-        print(f"   - RMSE: {metrics_train.get('rmse', 0):.2f}")
+        print(
+            "\n📊 Training Set Performance (CHALLENGER trained on baseline + fresh data):"
+        )
+        print(f"   - Training R²: {r2_train:.4f}")
+        print(f"   - Training RMSE: {metrics_train.get('rmse', 0):.2f}")
+        print("\n📌 Comparison with Test Sets:")
+        print(
+            f"   - Baseline Test R² (fixed, 181K): {r2_baseline:.4f} (regression check)"
+        )
+        print(
+            f"   - Current Test R² (fresh, 20%): {r2_current:.4f} (improvement check)"
+        )
+        print(
+            f"   - Overfitting check: Training R² ({r2_train:.4f}) vs Test R² ({r2_current:.4f})"
+        )
         print("=" * 60 + "\n")
 
         # Decision logic (compare fairly on both test sets)
@@ -1102,20 +1114,30 @@ def end_monitoring(**context):
         if double_eval_enabled:
             print("\n📊 Double Evaluation Results:")
             print(
-                f"   - Baseline R²: {r2_baseline:.4f}"
+                f"   - Baseline Test R² (181K fixed): {r2_baseline:.4f}"
                 if r2_baseline is not None
-                else "   - Baseline R²: N/A"
+                else "   - Baseline Test R²: N/A"
             )
             print(
-                f"   - Current R²: {r2_current:.4f}"
+                f"   - Current Test R² (20% fresh): {r2_current:.4f}"
                 if r2_current is not None
-                else "   - Current R²: N/A"
+                else "   - Current Test R²: N/A"
             )
             print(
-                f"   - Training R²: {r2_train:.4f}"
+                f"   - Training R² (baseline+fresh): {r2_train:.4f}"
                 if r2_train is not None
                 else "   - Training R²: N/A"
             )
+            if r2_train is not None and r2_current is not None:
+                gap = r2_train - r2_current
+                if gap > 0.35:
+                    print(
+                        f"   - Train/Test gap: {gap:+.4f} ⚠️ (possible overfit, review model)"
+                    )
+                else:
+                    print(
+                        f"   - Train/Test gap: {gap:+.4f} (normal for new data distribution)"
+                    )
             print(
                 f"   - Baseline regression: {'🚨 YES' if baseline_regression else '✅ NO'}"
             )
