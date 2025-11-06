@@ -133,7 +133,7 @@ TEST_DATA_PATH=gs://df_traffic_cyclist1/data/test_baseline.csv
 
 ---
 
-## Schémas des tables
+## Schéma de table
 
 ### Table `bike_traffic_raw.daily_YYYYMMDD`
 
@@ -147,35 +147,7 @@ CREATE TABLE `datascientest-460618.bike_traffic_raw.daily_20251011` (
   ingestion_ts TIMESTAMP
 );
 ```
-
-### Table `bike_traffic_predictions.daily_YYYYMMDD`
-
-```sql
-CREATE TABLE `datascientest-460618.bike_traffic_predictions.daily_20251011` (
-  comptage_horaire INT64,
-  prediction FLOAT64,
-  model_type STRING,
-  model_version STRING,
-  prediction_ts TIMESTAMP,
-  identifiant_du_compteur STRING
-);
-```
-
-### Table `monitoring_audit.logs`
-
-```sql
-CREATE TABLE `datascientest-460618.monitoring_audit.logs` (
-  timestamp TIMESTAMP,
-  drift_detected BOOL,
-  rmse FLOAT64,
-  r2 FLOAT64,
-  fine_tune_triggered BOOL,
-  fine_tune_success BOOL,
-  model_improvement FLOAT64,
-  env STRING,
-  error_message STRING
-);
-```
+> **Note:** Les autres tables (bike_traffic_predictions, monitoring_audit) suivent un schéma similaire.
 
 ---
 
