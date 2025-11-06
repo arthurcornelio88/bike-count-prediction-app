@@ -52,39 +52,10 @@ Run inference with a trained model (Random Forest or Neural Network).
 
 ---
 
-### 🔧 Local Example
+### 🔧 Example (Local - RF)
 
 ```bash
 curl -X POST "http://localhost:8000/predict" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "records": [
-      {
-        "nom_du_compteur": "35 boulevard de Ménilmontant NO-SE",
-        "date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00",
-        "coordonnées_géographiques": "48.8672, 2.3501",
-        "mois_annee_comptage": "mai 2025"
-      }
-    ],
-    "model_type": "nn",
-    "metric": "r2"
-  }'
-```
-
-**Response:**
-
-```json
-{
-  "predictions": [125.43]
-}
-```
-
----
-
-### ☁️ Production Example
-
-```bash
-curl -X POST "https://regmodel-api-467498471756.europe-west1.run.app/predict" \
   -H "Content-Type: application/json" \
   -d '{
     "records": [
@@ -104,9 +75,17 @@ curl -X POST "https://regmodel-api-467498471756.europe-west1.run.app/predict" \
 
 ```json
 {
-  "predictions": [123.78]
+  "predictions": [125.43]
 }
 ```
+
+---
+
+**Notes**: 
+
+- **Production**: Use the Cloud Run base URL (https://regmodel-api-467498471756.europe-west1.run.app); the request format remains the same.
+
+- **Neural Network**: Change "model_type": "nn" to run predictions with the Neural Network model. Everything else in the JSON stays the same.
 
 ---
 
@@ -155,6 +134,10 @@ Train a new model and upload it to GCS. Updates the model registry (`summary.jso
 
 ### 🔧 Local Examples
 
+**Notes:**
+- Production: change "env": "prod" and use the Cloud Run URL
+- Neural Network: change "model_type": "nn" to train or test the NN model
+
 #### Train Random Forest (dev mode)
 
 ```bash
@@ -182,41 +165,7 @@ curl -X POST "http://localhost:8000/train" \
 }
 ```
 
-#### Train Neural Network
 
-```bash
-curl -X POST "http://localhost:8000/train" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model_type": "nn",
-    "data_source": "reference",
-    "env": "dev"
-  }'
-```
-
-#### Train Classifier (affluence detection)
-
-```bash
-curl -X POST "http://localhost:8000/train" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model_type": "rf_class",
-    "data_source": "reference",
-    "env": "dev"
-  }'
-```
-
-#### Train with current data (DVC)
-
-```bash
-curl -X POST "http://localhost:8000/train" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model_type": "rf",
-    "data_source": "current",
-    "env": "dev"
-  }'
-```
 
 #### ⚡ Fast Test Mode (1000 samples, ~30s)
 
