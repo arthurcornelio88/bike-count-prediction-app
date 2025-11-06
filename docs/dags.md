@@ -212,11 +212,11 @@ Generates predictions by calling the ML API and stores results in BigQuery.
 
 **Key Features**:
 
-- **Recent Data Selection**: Queries last 24 hours of data for prediction
+- **Recent Data Selection**: Queries last 48 hours of data for prediction (allows ingestion delays)
 
   ```sql
   SELECT * FROM bike_traffic_raw.comptage_velo
-  WHERE date_et_heure_de_comptage >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
+  WHERE date_et_heure_de_comptage >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR)
   ORDER BY date_et_heure_de_comptage DESC
   LIMIT 500
   ```
@@ -579,17 +579,7 @@ When a new model is promoted to champion, we face a **metrics staleness problem*
 
 **Example Output**:
 
-```text
-🔍 Validating NEW CHAMPION: 7f37401f...
-📥 Loading predictions and actuals for new champion...
-✅ Loaded 1000 validation samples
-
-📈 NEW CHAMPION Validation Metrics:
-   - RMSE: 82.43
-   - MAE: 38.02
-   - R²: 0.5536
-   - Samples: 1000
-```
+![alt text](/docs/img/dag3_validate_champion.png)
 
 **Integration with end_monitoring**:
 

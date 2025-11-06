@@ -165,7 +165,83 @@ docker exec airflow-webserver airflow dags trigger monitor_and_fine_tune \
 - GCP credentials (service account JSON)
 - Python 3.11+ (for local development)
 
-### 1. Clone & Install
+### 1. Environment Configuration
+
+Create `.env` file at project root (see [docs/secrets.md](docs/secrets.md) for production setup):
+
+```bash
+# ========================================
+# Environment & GCP
+# ========================================
+ENV=DEV                                    # DEV or PROD
+GOOGLE_CLOUD_PROJECT=your-project-id
+GOOGLE_APPLICATION_CREDENTIALS=gcp.json
+
+# ========================================
+# BigQuery Configuration
+# ========================================
+BQ_PROJECT=your-project-id
+BQ_RAW_DATASET=bike_traffic_raw          # Raw data from API
+BQ_PREDICT_DATASET=bike_traffic_predictions  # Model predictions
+BQ_LOCATION=europe-west1
+
+# ========================================
+# Google Cloud Storage
+# ========================================
+GCS_BUCKET=your-bucket-name              # MLflow artifacts + model registry
+
+# ========================================
+# API Configuration
+# ========================================
+API_URL_DEV=http://regmodel-api:8000     # Internal Docker network
+API_KEY_SECRET=dev-key-unsafe            # Change for production!
+
+# ========================================
+# Model Performance Thresholds (v2.0.0)
+# ========================================
+R2_CRITICAL=0.45      # Below this → immediate retraining
+R2_WARNING=0.55       # Below this + drift → proactive retraining
+RMSE_THRESHOLD=90.0   # Above this → immediate retraining
+
+# Note: If you change these thresholds, also update:
+#   - monitoring/grafana/provisioning/dashboards/overview.json (lines 177, 181)
+#   - monitoring/grafana/provisioning/dashboards/model_performance.json
+#   - monitoring/grafana/provisioning/dashboards/training_deployment.json
+
+# ========================================
+# Discord Alerting (Optional)
+# ========================================
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+
+# ========================================
+# Grafana
+# ========================================
+GF_SECURITY_ADMIN_PASSWORD=your-strong-password
+
+# ========================================
+# MLflow Backend (Cloud SQL)
+# ========================================
+MLFLOW_TRACKING_URI=http://mlflow:5000
+MLFLOW_DB_USER=mlflow_user
+MLFLOW_DB_PASSWORD=your-db-password
+MLFLOW_DB_NAME=mlflow
+MLFLOW_INSTANCE_CONNECTION=project-id:region:instance-name
+
+# ========================================
+# Airflow Configuration
+# ========================================
+_AIRFLOW_WWW_USER_USERNAME=admin
+_AIRFLOW_WWW_USER_PASSWORD=admin
+AIRFLOW_UID=50000  # Match host user for volume permissions
+AIRFLOW_GID=50000
+```
+
+**Security Notes:**
+- ⚠️ `.env` contains secrets - NEVER commit to Git (already in `.gitignore`)
+- 🔐 For production: Use GCP Secret Manager (see [docs/secrets.md](docs/secrets.md))
+- 📝 Legacy file `.env.airflow` can be deleted (all vars moved to `.env`)
+
+### 2. Clone & Install
 
 ```bash
 git clone https://github.com/arthurcornelio88/ds_traffic_cyclist1.git

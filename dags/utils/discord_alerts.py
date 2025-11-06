@@ -213,18 +213,23 @@ def send_prediction_failure(error_msg: str, api_endpoint: str) -> bool:
     )
 
 
-def send_degraded_metrics_alert(r2: float, threshold: float = 0.70) -> bool:
+def send_degraded_metrics_alert(r2: float, threshold: float = None) -> bool:
     """
     Alert when prediction metrics are degraded (WARNING level).
 
     Args:
         r2: Current R² score
-        threshold: R² threshold (default 0.70)
+        threshold: R² threshold (default from env R2_WARNING)
 
     Returns:
         bool: True if sent successfully
     """
-    if r2 < 0.60:
+    if threshold is None:
+        threshold = float(os.getenv("R2_WARNING", "0.55"))
+
+    r2_critical = float(os.getenv("R2_CRITICAL", "0.45"))
+
+    if r2 < r2_critical:
         severity = "🚨 CRITICAL"
         impact = "Predictions are unreliable - immediate retraining required."
         color = 0xFF0000  # Red
@@ -289,19 +294,24 @@ def send_drift_alert(drift_share: float, r2: float, drifted_features: int) -> bo
     )
 
 
-def send_performance_alert(r2: float, rmse: float, threshold: float = 0.70) -> bool:
+def send_performance_alert(r2: float, rmse: float, threshold: float = None) -> bool:
     """
     Alert when model performance drops below threshold.
 
     Args:
         r2: Current R² score
         rmse: Current RMSE
-        threshold: R² threshold (default 0.70)
+        threshold: R² threshold (default from env R2_WARNING)
 
     Returns:
         bool: True if sent successfully
     """
-    if r2 < 0.65:
+    if threshold is None:
+        threshold = float(os.getenv("R2_WARNING", "0.55"))
+
+    r2_critical = float(os.getenv("R2_CRITICAL", "0.45"))
+
+    if r2 < r2_critical:
         severity = "🚨 CRITICAL"
         impact = "Predictions are unreliable - immediate retraining required."
         color = 0xFF0000  # Red

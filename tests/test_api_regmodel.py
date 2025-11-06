@@ -12,6 +12,11 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch, MagicMock
 import numpy as np
+import sys
+import os
+
+# Add backend/regmodel to Python path so 'from app.' imports work
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "backend", "regmodel"))
 
 
 # === Fixtures ===
@@ -20,28 +25,39 @@ import numpy as np
 @pytest.fixture(scope="module")
 def client():
     """FastAPI test client."""
-    # Mock credentials to avoid GCS calls during tests
-    with patch("backend.regmodel.app.fastapi_app.setup_credentials"):
-        with patch("backend.regmodel.app.fastapi_app.get_cached_model") as mock_model:
-            # Mock model behavior
-            mock_rf = MagicMock()
-            mock_rf.predict_clean.return_value = np.array([100.0, 150.0, 200.0])
+    # Mock model behavior
+    mock_rf = MagicMock()
+    mock_rf.predict_clean.return_value = np.array([100.0, 150.0, 200.0])
 
-            mock_nn = MagicMock()
-            mock_nn.predict_clean.return_value = np.array([[120.0], [180.0], [220.0]])
+    mock_nn = MagicMock()
+    mock_nn.predict_clean.return_value = np.array([[120.0], [180.0], [220.0]])
 
-            def get_model_side_effect(model_type, metric):
-                if model_type == "rf":
-                    return mock_rf
-                elif model_type == "nn":
-                    return mock_nn
-                raise ValueError(f"Unknown model_type: {model_type}")
+    # Mock metadata for champion model
+    mock_metadata = {
+        "run_id": "test_run_123",
+        "is_champion": True,
+        "r2": 0.85,
+        "rmse": 50.0,
+        "model_type": "rf",
+    }
 
-            mock_model.side_effect = get_model_side_effect
+    def get_model_side_effect(model_type, **kwargs):
+        """Mock get_best_model_from_summary - accepts any parameters."""
+        if model_type == "rf":
+            return (mock_rf, mock_metadata)
+        elif model_type == "nn":
+            return (mock_nn, mock_metadata)
+        raise ValueError(f"Unknown model_type: {model_type}")
 
-            from backend.regmodel.app.fastapi_app import app
+    # Mock model_registry_summary to avoid GCS calls
+    # Now 'from app.' resolves to backend/regmodel/app/ thanks to sys.path
+    with patch(
+        "app.model_registry_summary.get_best_model_from_summary",
+        side_effect=get_model_side_effect,
+    ):
+        from backend.regmodel.app.fastapi_app import app
 
-            yield TestClient(app)
+        yield TestClient(app)
 
 
 @pytest.fixture
@@ -63,6 +79,8 @@ class TestPredictEndpoint:
         """Test successful prediction with RF model."""
         response = client.post("/predict", json=api_request_payload)
 
+        if response.status_code != 200:
+            print(f"Error: {response.json()}")
         assert response.status_code == 200
         data = response.json()
 

@@ -103,11 +103,11 @@ def run_daily_prediction(**context):
     # 1️⃣ Read recent data from BigQuery partitioned table
     client = bigquery.Client(project=ENV_CONFIG["BQ_PROJECT"])
 
-    # Query most recent data (last 24 hours for prediction)
+    # Query most recent data (last 48 hours for prediction, allows ingestion delays)
     query = f"""
     SELECT *
     FROM `{raw_table}`
-    WHERE date_et_heure_de_comptage >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 24 HOUR)
+    WHERE date_et_heure_de_comptage >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(), INTERVAL 48 HOUR)
     ORDER BY date_et_heure_de_comptage DESC
     LIMIT 500
     """  # nosec B608

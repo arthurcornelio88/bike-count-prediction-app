@@ -31,6 +31,7 @@ Runs weekly to assess model performance and retrain if needed.
 from airflow import DAG
 from airflow.operators.python import PythonOperator, BranchPythonOperator
 from datetime import datetime, timedelta
+import os
 import requests
 import pandas as pd
 from google.cloud import bigquery
@@ -306,10 +307,10 @@ def decide_if_fine_tune(**context):
                 1.0 if drift else 0.0
             )  # Fallback: assume full drift if detected
 
-    # Thresholds (adjusted for production data distribution)
-    R2_CRITICAL = 0.45  # Below this → retrain immediately (reactive)
-    R2_WARNING = 0.55  # Below this + high drift → retrain proactively
-    RMSE_THRESHOLD = 90.0  # Above this → retrain immediately (was 60.0)
+    # Thresholds (from environment variables)
+    R2_CRITICAL = float(os.getenv("R2_CRITICAL", "0.45"))
+    R2_WARNING = float(os.getenv("R2_WARNING", "0.55"))
+    RMSE_THRESHOLD = float(os.getenv("RMSE_THRESHOLD", "90.0"))
     DRIFT_CRITICAL = 0.5  # 50%+ drift share → critical
     DRIFT_WARNING = 0.3  # 30%+ drift share → warning
 
