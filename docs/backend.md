@@ -24,14 +24,6 @@ Cela instancie deux services :
 
 ### 🔁 Endpoints locaux
 
-#### ClassModel API
-
-```bash
-curl -X POST 'http://localhost:8080/predict' \
-  -H "Content-Type: application/json" \
-  -d '{"records": [{"nom_du_compteur": "35 boulevard de Ménilmontant NO-SE", "date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00", "coordonnées_géographiques": "48.8672, 2.3501", "mois_annee_comptage": "mai 2025"}]}'
-```
-
 #### RegModel API
 
 ```bash
@@ -39,7 +31,7 @@ curl -X POST 'http://localhost:8000/predict' \
   -H "Content-Type: application/json" \
   -d '{"records": [{"nom_du_compteur": "35 boulevard de Ménilmontant NO-SE", "date_et_heure_de_comptage": "2025-05-17 18:00:00+02:00", "coordonnées_géographiques": "48.8672, 2.3501", "mois_annee_comptage": "mai 2025"}], "model_type": "nn", "metric": "r2"}'
 ```
-
+**Note**: ClassModel et RegModel partagent le même endpoint ; seuls leurs ports locaux diffèrent : 8080 pour ClassModel, 8000 pour RegModel.
 ---
 
 ## ☁️ Déploiement en production (GCP Cloud Run)
@@ -81,26 +73,6 @@ gcloud auth configure-docker europe-west1-docker.pkg.dev
 
 ## 🧩 Déploiement des services
 
-### 🔹 ClassModel API
-
-```bash
-cd backend/classmodel
-
-docker build -t europe-west1-docker.pkg.dev/datascientest-460618/cloud-run-images/classmodel-api:latest .
-
-docker push europe-west1-docker.pkg.dev/datascientest-460618/cloud-run-images/classmodel-api:latest
-
-gcloud run deploy classmodel-api \
-  --image europe-west1-docker.pkg.dev/datascientest-460618/cloud-run-images/classmodel-api:latest \
-  --region europe-west1 \
-  --allow-unauthenticated \
-  --port 8080 \
-  --memory=4Gi \
-  --set-env-vars=ENV=PROD \
-  --update-secrets=GCP_JSON_CONTENT=gcp-service-account:latest
-```
-
----
 
 ### 🔹 RegModel API
 
@@ -121,6 +93,7 @@ gcloud run deploy regmodel-api \
   --update-secrets=GCP_JSON_CONTENT=gcp-service-account:latest
 ```
 
+**Note :** L’API ClassModel suit le même processus que RegModel ; seul le port local diffère (8080 pour ClassModel, 8000 pour RegModel).
 ---
 
 ## 🌐 Endpoints en production
