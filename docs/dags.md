@@ -512,7 +512,7 @@ Invokes the FastAPI `/train` endpoint with `data_source="baseline"` and optional
   - RMSE: **47.26**
   - MAE: **36.46**
 
-- **Training Metrics** (on train_baseline, 726K samples):
+- **Training Metrics** (on merged train sets, 726K samples):
   - R²: **0.8658** (strong generalization)
   - RMSE: **64.89**
 
