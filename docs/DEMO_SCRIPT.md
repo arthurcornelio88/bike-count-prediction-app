@@ -1,7 +1,8 @@
 # Demo Script - MLOps Bike Traffic Prediction (2 minutes)
 
 **Presentation Date**: November 7, 2025
-**Video Duration**: 2 minutes (fast-forward editing in DaVinci Resolve)
+**Video Duration**: 2 minutes 20 seconds (fast-forward editing in DaVinci Resolve)
+**Key Feature**: Demonstrates complete champion/challenger lifecycle with validate_new_champion task
 
 ---
 
@@ -74,7 +75,7 @@
 
 ---
 
-## SCENE 3: Airflow - MLOps Pipeline (0:45 - 1:30)
+## SCENE 3: Airflow - MLOps Pipeline (0:45 - 1:45)
 
 ### Actions
 
@@ -93,112 +94,181 @@
 
 ### What to Show
 
-1. **Airflow DAG 3** (Monitor & Train):
-   - Task 1: `validate_model` (green)
-   - Task 2: `detect_drift` (green)
-   - Task 3: `make_decision` → `fine_tune_model` (green)
-   - Task 4: `fine_tune_model` (green, FAST-FORWARD)
-   - Task 5: `log_audit` (green)
+1. **Airflow DAG 3** (Monitor & Train) - Task Graph View:
+   - Task 1: `monitor_drift` (green)
+   - Task 2: `validate_model` (green) - validates OLD CHAMPION
+   - Task 3: `decide_fine_tune` → branches to `fine_tune_model` (green)
+   - Task 4: `fine_tune_model` (green, FAST-FORWARD) - trains CHALLENGER + promotes to NEW CHAMPION
+   - Task 5: `validate_new_champion` (green) - validates NEW CHAMPION metrics
+   - Task 6: `end_monitoring` (green) - audit logs with NEW CHAMPION metrics
 
-2. **Discord Webhook** (switch to Discord):
+2. **Airflow Task Logs** (quick glimpse):
+   - Show `fine_tune_model` logs with:
+     - "OLD CHAMPION: abc12345..."
+     - "CHALLENGER: xyz98765..."
+     - "DECISION: DEPLOY - CHALLENGER improved"
+     - "PROMOTING CHALLENGER TO NEW CHAMPION"
+   - Show `validate_new_champion` logs with:
+     - "Validating NEW CHAMPION: xyz98765..."
+     - "NEW CHAMPION Validation Metrics: RMSE: 32.5, R²: 0.78"
+
+3. **Discord Webhook** (switch to Discord):
    - Show notification: "🏆 Champion Model Promoted"
    - Fields:
      - Model Type: rf
+     - New Champion Run ID: xyz98765...
      - R² (current): 0.78
      - R² (baseline): 0.65
      - Improvement: +0.05
+     - RMSE: 32.5
 
-3. **BigQuery Console**:
+4. **BigQuery Console**:
    - Dataset `monitoring_audit` → table `logs`
    - Show latest row with:
      - drift_detected: true
      - fine_tune_triggered: true
      - deployment_decision: "deploy"
-     - r2_current: 0.78
+     - r2_current: 0.78 (NEW CHAMPION metric)
+     - r2_baseline: 0.65
+     - champion_promoted: true
 
 ### Voice-over / Text Overlay
 
-> "DAG 3: Weekly monitoring & training pipeline"
+> "DAG 3: Weekly monitoring & training pipeline with automated champion promotion"
 >
-> "1. Validate champion model (R² check)"
+> "1. Monitor drift with Evidently"
 >
-> "2. Detect drift with Evidently"
+> "2. Validate OLD CHAMPION on production data (last 7 days)"
 >
-> "3. Sliding window training (660K baseline + 1.6K fresh data)"
+> "3. Decision: Hybrid strategy (reactive + proactive)"
 >
-> "4. Double evaluation (test_baseline + test_current)"
+> "4. Train CHALLENGER with sliding window (660K baseline + 1.6K fresh data)"
 >
-> "5. Deploy new champion ✅"
+> "5. Double evaluation: test_baseline (regression check) + test_current (improvement check)"
+>
+> "6. Automatic promotion: CHALLENGER → NEW CHAMPION if metrics improved"
+>
+> "7. Validate NEW CHAMPION on production data (fresh metrics for monitoring)"
+>
+> "8. Audit log: Track OLD → NEW champion transition"
 >
 > "Discord alert: Champion promoted with +5% improvement 🏆"
 
 ---
 
-## SCENE 4: Grafana Dashboards (1:30 - 2:00)
+## SCENE 4: Verify Champion Replacement (1:45 - 1:55)
+
+### Actions
+
+**Return to Airflow UI** and **trigger DAG 2** (`dag_daily_prediction`) again:
+- Click on DAG
+- Click "Trigger DAG" button
+- Wait for completion (fast-forward)
+
+### What to Show
+
+1. **Airflow DAG 2 Logs** (quick glimpse):
+   - Show task `predict_last_7_days` logs with:
+     - "Loading champion model from summary.json..."
+     - "Champion model: rf (run_id: xyz98765..., is_champion: True)"
+     - "✅ NEW CHAMPION automatically loaded for predictions"
+
+2. **BigQuery Console**:
+   - Dataset `bike_traffic_predictions` → table `daily_YYYYMMDD`
+   - Show latest predictions with NEW CHAMPION run_id
+
+3. **FastAPI Docs** (optional):
+   - Open `http://localhost:8000/docs`
+   - Call `/model_summary` endpoint
+   - Show response with NEW CHAMPION marked as `is_champion: true`
+
+### Voice-over / Text Overlay
+
+> "Zero-downtime deployment: New predictions automatically use the promoted champion"
+>
+> "DAG 2 re-run: Loads NEW CHAMPION from summary.json (xyz98765...)"
+>
+> "No API restart needed - model registry updated seamlessly"
+
+---
+
+## SCENE 5: Grafana Dashboards (1:55 - 2:15)
 
 ### Actions
 
 **Open Grafana**: `http://localhost:3000`
 
-**Show 4 dashboards** (5-7 seconds each):
+**Show 4 dashboards** (5 seconds each):
 
 1. **MLOps - Overview**
    - Drift Status: YES (50%)
-   - Champion R²: 0.78
+   - Champion R²: 0.78 (NEW CHAMPION metric from validate_new_champion)
    - API Request Rate: graph
    - Services Health: all green
 
 2. **MLOps - Model Performance**
-   - R² Trend (champion vs challenger): line graph
-   - RMSE: 32.5
-   - API Latency P95: 150ms
+   - R² Trend (champion): line graph showing improvement after promotion
+   - RMSE: 32.5 (improved after NEW CHAMPION)
+   - API Latency P95: <200ms
 
 3. **MLOps - Drift Monitoring**
-   - Data Drift Over Time: line graph (50% drift)
+   - Data Drift Over Time: line graph (50% drift triggered retraining)
    - Drifted Features Count: 15 features
 
 4. **MLOps - Training & Deployment**
    - Training Success Rate: 100%
-   - Deployment Decisions: pie chart (deploy/skip/reject)
-   - Champion vs Challenger R²: bar chart
+   - Deployment Decisions: pie chart (last decision: "deploy")
+   - Champion vs Challenger R²: bar chart showing NEW CHAMPION superiority
 
 ### What to Show
 
 - Quick pan through each dashboard (don't linger)
 - Focus on KEY METRICS ONLY:
-  - Drift: 50%
-  - Champion R²: 0.78
+  - Drift: 50% (detected)
+  - Champion R²: 0.78 (improved from OLD CHAMPION)
   - Training success: 100%
+  - Deployment decision: DEPLOY
 
 ### Voice-over / Text Overlay
 
-> "Real-time monitoring with Grafana:"
+> "Real-time monitoring with Grafana - metrics updated with NEW CHAMPION:"
 >
-> "📊 Overview: Drift 50%, Champion R² 0.78, All services healthy"
+> "📊 Overview: Drift 50% detected → Retraining triggered"
 >
-> "📈 Performance: RMSE 32.5, API latency <200ms"
+> "📈 Performance: Champion R² improved to 0.78, RMSE 32.5"
 >
-> "🔍 Drift: 15 features drifted, model adapted"
+> "🔍 Drift: 15 features drifted → Model adapted automatically"
 >
-> "✅ Training: 100% success rate, automated deployment"
+> "✅ Training: 100% success rate, champion promoted seamlessly"
 
 ---
 
-## FINAL SCENE: Summary (2:00)
+## FINAL SCENE: Summary (2:15 - 2:20)
 
 ### Text Overlay (no voice, just text on black screen)
 
 ```
-✅ Production MLOps Pipeline
+✅ Production MLOps Pipeline - Full Champion/Challenger Lifecycle
 
+Architecture:
 • 3 Airflow DAGs (ingestion, predictions, training)
-• Champion/Challenger system with automated deployment
-• Sliding window training (660K + 1.6K samples)
+• Champion/Challenger system with automated promotion
+• Sliding window training (660K baseline + 1.6K fresh data)
 • Double evaluation (test_baseline + test_current)
-• Real-time monitoring (Prometheus + Grafana)
-• Discord alerting for critical events
 
-📊 All metrics tracked • 🏆 Zero-downtime deployments
+Key Features Demonstrated:
+• OLD CHAMPION validated on production data (last 7 days)
+• CHALLENGER trained with hybrid drift strategy (reactive + proactive)
+• Automatic promotion: CHALLENGER → NEW CHAMPION (if metrics improved)
+• NEW CHAMPION validated immediately after promotion
+• Zero-downtime: Next predictions automatically use NEW CHAMPION
+
+Monitoring & Alerting:
+• Real-time metrics (Prometheus + Grafana)
+• Discord alerts for champion promotions, drift, and failures
+• BigQuery audit logs track OLD → NEW champion transitions
+
+📊 All metrics tracked • 🏆 Zero-downtime deployments • 🔄 Automated lifecycle
 ```
 
 ---
@@ -216,25 +286,47 @@
    - Speed: 8x for task execution
    - Normal speed for: trigger button click, Discord alerts, BigQuery views
 
-3. **DAG 3 training** (0:45-1:30):
+3. **DAG 3 training** (0:45-1:45):
    - Speed: 16x for training task (it takes ~20 minutes in reality)
-   - Normal speed for: decision tasks, Discord champion alert, BigQuery audit
+   - Normal speed for:
+     - Decision tasks and branch logic
+     - `fine_tune_model` logs showing OLD → NEW champion transition
+     - `validate_new_champion` task execution and logs
+     - Discord champion promotion alert
+     - BigQuery audit log view
 
-4. **Grafana dashboards** (1:30-2:00):
+4. **DAG 2 re-run** (1:45-1:55):
+   - Speed: 8x for task execution
+   - Normal speed for: logs showing NEW CHAMPION loaded, BigQuery predictions
+
+5. **Grafana dashboards** (1:55-2:15):
    - Speed: 1.5x (slight speed-up for smooth flow)
    - Smooth transitions between dashboards (crossfade 0.5s)
+   - Highlight champion R² improvement in charts
+
+6. **Final summary** (2:15-2:20):
+   - Fade to black with text overlay (5 seconds)
 
 ### Camera Focus / Screen Capture
 
 - **Full screen captures** for:
   - Terminal (startup)
-  - Airflow UI (DAGs)
-  - Discord (alerts)
-  - BigQuery (tables)
-  - Grafana (dashboards)
+  - Airflow UI (DAGs, task graph, task logs)
+  - Discord (champion promotion alerts)
+  - BigQuery (raw data, predictions, audit logs)
+  - Grafana (4 dashboards)
+  - FastAPI Docs (optional - model_summary endpoint)
 
 - **Picture-in-picture** (optional):
   - Show terminal logs in corner while showing Airflow UI
+  - Show Discord notification overlay when champion is promoted
+
+- **Key moments to capture** (close-up / zoom):
+  - Airflow task graph showing `validate_new_champion` task (green)
+  - `fine_tune_model` logs: "PROMOTING CHALLENGER TO NEW CHAMPION"
+  - `validate_new_champion` logs: "NEW CHAMPION Validation Metrics"
+  - BigQuery audit log row with `deployment_decision: "deploy"`
+  - Discord alert with champion promotion details
 
 ### Audio
 
@@ -243,6 +335,54 @@
 - **Sound effects** (optional):
   - Success chime for Discord alerts
   - Soft "whoosh" for dashboard transitions
+
+---
+
+## Demo Strategy: Two Scenarios
+
+### Scenario A: Full Champion Promotion (Recommended for demo)
+
+**Use when**: You want to showcase the complete champion/challenger lifecycle
+
+**Configuration**:
+```json
+{
+  "force_fine_tune": true,
+  "test_mode": false
+}
+```
+
+**What happens**:
+1. DAG 3 trains CHALLENGER
+2. CHALLENGER beats OLD CHAMPION → automatic promotion
+3. `validate_new_champion` runs → fresh metrics
+4. DAG 2 re-run loads NEW CHAMPION
+5. Grafana shows improved metrics
+
+**Pros**: Shows the full MLOps automation (most impressive)
+**Cons**: Takes ~20 minutes (need fast-forward editing)
+
+---
+
+### Scenario B: No Retraining (Skip scenario)
+
+**Use when**: You want to show monitoring without training
+
+**Configuration**: Don't set `force_fine_tune` flag (or set to `false`)
+
+**What happens**:
+1. DAG 3 validates OLD CHAMPION
+2. No drift detected (or drift but metrics still good)
+3. Decision: SKIP fine-tuning
+4. `end_monitoring` logs "no retraining needed"
+5. DAG 2 re-run still uses OLD CHAMPION
+
+**Pros**: Faster to record (no 20-minute training)
+**Cons**: Doesn't showcase champion promotion
+
+---
+
+**Recommendation**: Use Scenario A (full promotion) for the demo to highlight the automated champion/challenger system, which is the key differentiator of this MLOps pipeline.
 
 ---
 
@@ -308,7 +448,13 @@
 - [ ] Transitions (smooth, not distracting)
 - [ ] Audio levels (balanced, no clipping)
 - [ ] Export settings: 1080p, 60fps, H.264
-- [ ] Total duration: 2:00 ± 5 seconds
+- [ ] Total duration: 2:20 ± 5 seconds
+- [ ] Highlight key moments:
+  - [ ] `validate_new_champion` task in Airflow graph
+  - [ ] Champion promotion logs in `fine_tune_model`
+  - [ ] NEW CHAMPION loaded in DAG 2 re-run
+  - [ ] Discord champion promotion alert
+  - [ ] BigQuery audit log with deployment decision
 
 ---
 

@@ -84,14 +84,16 @@ Paris Open Data API
 
 **Schedule**: Daily @ 04:00
 
-**Flow**:
+**Flow with Automatic Champion Loading**:
 ```
 BigQuery (last 7 days)
   → prepare_data
-  → POST /predict (FastAPI)
-  → store_predictions
+  → POST /predict (loads CHAMPION from summary.json automatically)
+  → store_predictions (with champion run_id)
   → BigQuery (bike_traffic_predictions)
 ```
+
+**Key**: Zero-downtime deployment - always loads current champion (is_champion=True)
 
 ### BigQuery Datasets
 
@@ -115,25 +117,28 @@ BigQuery (last 7 days)
 
 **Schedule**: Weekly @ Sunday 00:00
 
-**Simplified Flow**:
+**Complete Flow with Champion Lifecycle**:
 ```
-1. Validate Champion (R² check)
+1. monitor_drift (Evidently)
    ↓
-2. Detect Drift (Evidently)
+2. validate_model (validate OLD CHAMPION on last 7 days)
    ↓
-3. Decision: WAIT or RETRAIN?
+3. decide_fine_tune (hybrid strategy: reactive + proactive)
    ↓ (if RETRAIN)
-4. Fetch last 30 days from BigQuery
+4. fine_tune_model:
+   - Fetch last 30 days from BigQuery
+   - POST /train (sliding window: 660K baseline + 1.6K current)
+   - Double Evaluation (test_baseline + test_current)
+   - Deployment Decision (REJECT/SKIP/DEPLOY)
+   - POST /promote_champion (if DEPLOY)
    ↓
-5. POST /train (sliding window: baseline + current)
+5. validate_new_champion (validate NEW CHAMPION on last 7 days)
+   - Provides fresh metrics for NEW CHAMPION
+   - Pushes to XCom for audit logging
    ↓
-6. Double Evaluation (test_baseline + test_current)
-   ↓
-7. Deployment Decision (REJECT/SKIP/DEPLOY)
-   ↓ (if DEPLOY)
-8. POST /promote_champion
-   ↓
-9. Log audit → BigQuery + Discord alert
+6. end_monitoring (audit log with NEW CHAMPION metrics)
+   - BigQuery: monitoring_audit.logs
+   - Discord alert (if champion promoted)
 ```
 
 **Key Decision Logic**:
@@ -174,6 +179,8 @@ MLflow Server (port 5000)
 - Append-only JSON with all trained models
 - Champion designation via `is_champion=True`
 - Priority loading: Champion > best metric
+- Updated by `/promote_champion` endpoint
+- Read by `/predict` for zero-downtime deployment
 
 ### Monitoring & Alerting
 
@@ -198,7 +205,12 @@ Discord Webhook
 **Alerting Rules**:
 - **Critical**: R² < 0.60, drift > 70%, API error > 10%, training failure
 - **Warning**: R² < 0.70, drift > 50%, latency > 500ms
-- **Info**: Successful deployment, champion promotion
+- **Info**: Champion promotion, successful deployment
+
+**Discord Alerts Triggered By**:
+- DAG 3: Champion promotion (with OLD/NEW run_ids + metrics)
+- DAG 3: Drift detection, performance degradation, training failures
+- Grafana: Critical/warning threshold breaches
 
 ---
 
