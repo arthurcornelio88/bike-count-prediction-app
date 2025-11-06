@@ -1,7 +1,7 @@
 # 🚲 Bike Traffic Prediction - MLOps Production Pipeline
 
 [![CI Tests](https://github.com/arthurcornelio88/ds_traffic_cyclist1/actions/workflows/ci.yml/badge.svg)](https://github.com/arthurcornelio88/ds_traffic_cyclist1/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/arthurcornelio88/ds_traffic_cyclist1/branch/master/graph/badge.svg)](https://codecov.io/gh/arthurcornelio88/ds_traffic_cyclist1)
+[![codecov](https://codecov.io/gh/arthurcornelio88/bike-count-prediction-app/branch/master/graph/badge.svg?token=O9XOGPGO6G)](https://codecov.io/gh/arthurcornelio88/bike-count-prediction-app)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
 [![type: mypy](https://img.shields.io/badge/type-mypy-blue.svg)](https://github.com/python/mypy)
