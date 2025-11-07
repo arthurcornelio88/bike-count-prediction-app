@@ -6,7 +6,7 @@
 [![security: bandit](https://img.shields.io/badge/security-bandit-yellow.svg)](https://github.com/PyCQA/bandit)
 [![type: mypy](https://img.shields.io/badge/type-mypy-blue.svg)](https://github.com/python/mypy)
 
-**Version 2.0.0** - Production-ready MLOps pipeline for predicting hourly bike traffic in Paris. Features automated data ingestion from Paris Open Data API, intelligent drift detection with sliding window training, champion/challenger model system with double evaluation, real-time monitoring via Prometheus + Grafana, and Discord alerting for critical events. Orchestrated with Airflow, tracked with MLflow (Cloud SQL backend), and deployed with FastAPI. All infrastructure runs locally via Docker Compose with 15 services. Production Kubernetes deployment under construction.
+**Version 2.0.0-rc.1** - MLOps pipeline (Local Development Ready) for predicting hourly bike traffic in Paris. Features automated data ingestion from Paris Open Data API, intelligent drift detection with sliding window training, champion/challenger model system with double evaluation, real-time monitoring via Prometheus + Grafana, and Discord alerting for critical events. Orchestrated with Airflow, tracked with MLflow (Cloud SQL backend), and deployed with FastAPI. All infrastructure runs locally via Docker Compose with 15 services. Production Kubernetes deployment under construction.
 
 ---
 
