@@ -10,6 +10,10 @@
 
 ---
 
+## 🎥 Vidéo demo
+
+[Watch a 4‑minute demo of the complete MLOps pipeline on Vimeo](https://vimeo.com/1134350951)
+
 ## 🚀 Quick Start
 
 ### Local Development (All Services)
