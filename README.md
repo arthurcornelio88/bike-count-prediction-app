@@ -18,7 +18,18 @@
 
 ### Local Development (All Services)
 
+### Environment configuration (local vs prod)
+
+- Local (recommended for development)
+  1. Copy the example file and edit values:
+     ```bash
+     cp .env.example .env
+     # then edit .env with your editor (do NOT commit)
+     ```
+  2. Example file: [.env.example](.env.example)
+
 ```bash
+
 # Start full MLOps stack (MLflow, Airflow, FastAPI, Monitoring)
 ./scripts/start-all.sh --with-monitoring
 

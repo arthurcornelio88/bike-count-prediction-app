@@ -446,7 +446,7 @@ Pulls 7 days of predictions vs actuals and computes RMSE/R² using BigQuery wind
 
 **Highlights**:
 
-- Ensures current champion is still performant (default thresholds: R² ≥ 0.65, RMSE ≤ 60)
+- Ensures current champion is still performant
 - Pushes metrics to XCom for decision step (`r2`, `rmse`, `validation_samples`)
 
 ![validate_model screenshot placeholder](/docs/img/dag3_validate_model.png)
@@ -464,6 +464,10 @@ BranchPythonOperator applying **Hybrid Drift Management Strategy** (combining pr
 5. **ALL GOOD** (drift < 30% AND good metrics): Continue monitoring, no action
 
 **Thresholds:**
+
+These thresholds are configurable (for example, via a .env file) and should be tuned to reflect real production behavior, monitoring objectives, and operational constraints.
+
+Example:
 
 - R² critical: 0.65 (below = immediate retrain)
 - R² warning: 0.70 (below + high drift = proactive retrain)
@@ -488,7 +492,7 @@ Invokes the FastAPI `/train` endpoint with `data_source="baseline"` and optional
 - Fetches 30 days from BigQuery and submits 2k samples (configurable)
 - Sliding-window strategy: combines baseline training data with fresh samples when schemas align
 - Double evaluation: champion vs new model on `test_baseline` + holdout current data
-- Writes result metrics, run ids, and deployment decision back to XCom for auditing
+- Writes result metrics, run ids, and deployment decision back to monitoring system (XCom/Prometheus/Discord) for auditing
 - **Champion Promotion**: When decision="deploy", calls `/promote_champion` endpoint to update `summary.json`
 
 **Real Production Run Results (2025-11-05, test_mode=false)**:
@@ -581,6 +585,13 @@ When a new model is promoted to champion, we face a **metrics staleness problem*
 
 ![alt text](/docs/img/dag3_validate_champion.png)
 
+**In Discord**:
+✅ Validation passed — non‑critical threshold warning
+
+> The model is validated and meets acceptance criteria. A non‑critical warning indicates a metric is close to (but has not breached) the configured threshold. No retraining is required now; monitor the metric and consider adjusting thresholds or investigating if the warning recurs.
+
+![Discord val](/docs/img/discord_validation.png)
+
 **Integration with end_monitoring**:
 
 The `end_monitoring` task (3.6) checks for these new metrics:
@@ -608,10 +619,10 @@ This ensures BigQuery receives the **correct champion metrics**, which Prometheu
 
 **Impact**:
 
-✅ Grafana dashboards immediately reflect new champion's performance
-✅ Monitoring alerts trigger on actual production model metrics
-✅ Team has visibility into post-promotion model behavior
-✅ Audit trail tracks both pre- and post-promotion metrics
+- ✅ Grafana dashboards immediately reflect new champion's performance
+- ✅ Monitoring alerts trigger on actual production model metrics
+- ✅ Team has visibility into post-promotion model behavior
+- ✅ Audit trail tracks both pre- and post-promotion metrics
 
 #### 3.6 `end_monitoring`
 
@@ -649,33 +660,43 @@ This demonstrates the complete MLOps loop: drift detection → validation → tr
 
 **Updated Flow (with validate_new_champion)**:
 
-```text
-Reference CSV (data/reference_data.csv)      BigQuery current window (7 days)
-                 │                                      │
-                 └── monitor_drift ──── drift summary ──┘
-                                   │
-                      validate_model (OLD champion RMSE / R²)
-                                   │
-                      decide_fine_tune (branch)
-                       │                                          │
-         ┌─────────────┴────────────────┐                        │
-         │                              │                        │
-   fine_tune_model            end_monitoring (no training)       │
-   (train + promote)                    │                        │
-         │                              │                        │
-   validate_new_champion                │                        │
-   (NEW champion metrics)               │                        │
-         │                              │                        │
-         └──────────────┬───────────────┘                        │
-                        │                                         │
-                end_monitoring ─────────────────────────────────┘
-                (uses NEW champion metrics if promotion,
-                 else uses OLD champion metrics)
-                        │
-           BigQuery monitoring_audit.logs
-                        │
-                  Prometheus/Grafana
-                  (shows correct champion R²)
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     DAG 3: Monitor & Train Flow                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+Reference CSV                           BigQuery current
+(data/reference_data.csv)               (7 days window)
+         │                                      │
+         └────────── monitor_drift ─────────────┘
+                           │
+                    drift summary
+                           │
+                  validate_model
+              (OLD champion RMSE / R²)
+                           │
+                  decide_fine_tune
+                     (branch)
+                       │
+        ┌──────────────┴──────────────┐
+        │                             │
+   fine_tune_model         end_monitoring
+   (train + promote)       (no training)
+        │                             │
+   validate_new_champion              │
+   (NEW champion metrics)             │
+        │                             │
+        └─────────────┬───────────────┘
+                      │
+              end_monitoring
+         (uses NEW champion metrics
+          if promotion happened,
+          else OLD champion metrics)
+                      │
+         BigQuery monitoring_audit.logs
+                      │
+            Prometheus/Grafana
+         (shows correct champion R²)
 ```
 
 **Key Flow Changes**:
