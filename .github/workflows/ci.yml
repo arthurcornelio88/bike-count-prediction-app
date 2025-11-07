@@ -4,7 +4,7 @@ on:
   push:
     branches: [feat/*, v2.0.0, master, main]
   pull_request:
-    branches: [master, main]
+    branches: [v2.0.0]
 
 jobs:
   # Job 1: Pre-commit hooks (linting, formatting, security)
