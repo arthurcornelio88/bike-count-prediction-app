@@ -56,7 +56,7 @@ Double evaluation prevents deploying models that fit new data but lose generaliz
 
 | Test Set | Purpose | Size | Threshold |
 |----------|---------|------|-----------|
-| **test_baseline** | Detect regression on known data | 132K samples (fixed) | R² >= 0.60 |
+| **test_baseline** | Detect regression on known data | 181K samples (fixed) | R² >= 0.60 |
 | **test_current** | Evaluate on new distribution | 20% of production data | Must improve vs. current champion |
 
 ### Decision Logic
@@ -81,7 +81,7 @@ else:
 
 **Test case**: Intentional small-sample training to verify regression detection
 
-| Metric | Training (964 rows) | test_baseline (132K) | test_current (38) | Decision |
+| Metric | Training (964 rows) | test_baseline (181K) | test_current (38) | Decision |
 |--------|---------------------|----------------------|-------------------|----------|
 | RMSE   | 35.90               | 317.10               | 36.01             | Reject   |
 | R²     | 0.882               | **0.051** 🚨         | 0.854             | ❌ Regression detected |
@@ -107,9 +107,18 @@ Double evaluation correctly rejected deployment.
 
 ```bash
 # Baseline datasets on GCS
-TRAIN_DATA_PATH=gs://df_traffic_cyclist1/data/train_baseline.csv  # 660K rows
-TEST_DATA_PATH=gs://df_traffic_cyclist1/data/test_baseline.csv    # 132K rows
+TRAIN_DATA_PATH=gs://df_traffic_cyclist1/data/train_baseline.csv  # 660K rows (initial), grows via quarterly merging
+TEST_DATA_PATH=gs://df_traffic_cyclist1/data/test_baseline.csv    # 181K rows
 ```
+
+**Note on Dataset Size Evolution:**
+
+The `train_baseline.csv` size grows over time through quarterly data merging (see "Quarterly Retraining" section):
+- **Initial size** (2025-01-01): 660K samples
+- **After Q4 2025 merge** (2025-11-05): 724K samples
+- **Expected annual growth**: ~64K samples (3 months of production data per quarter)
+
+This growth is expected and beneficial - it ensures the model learns from an expanding historical context while maintaining a stable test set for regression detection.
 
 ### Training Commands
 
@@ -207,21 +216,22 @@ python backend/regmodel/app/train.py \
 ### Airflow DAG Workflow
 
 ```mermaid
-graph LR
+graph TB
     A[Monitor Drift] --> B{Drift Detected?}
-    B -->|No| C[End]
-    B -->|Yes| D[Validate Champion]
-    D --> E{RMSE > 50?}
-    E -->|No| C
-    E -->|Yes| F[Fetch Last 30 Days]
-    F --> G[Fine-Tune on Baseline]
-    G --> H[Double Evaluation]
-    H --> I{Decision}
-    I -->|Deploy| J[Promote to Production]
-    I -->|Reject| K[Keep Current]
-    I -->|Skip| K
-    J --> L[Log to Audit]
-    K --> L
+    B -->|No| C[Validate Champion]
+    B -->|Yes| C
+    C --> D{Decide Fine-Tune}
+    D -->|No Retrain| E[End Monitoring]
+    D -->|Retrain| F[Fine-Tune Model]
+    F --> G[Double Evaluation]
+    G --> H{Decision}
+    H -->|Deploy| I[Promote Champion]
+    H -->|Reject/Skip| E
+    I --> J[Validate New Champion]
+    J --> E
+    E --> K[Log to BigQuery]
+    K --> L[Prometheus]
+    L --> M[Grafana Dashboard]
 ```
 
 **Trigger manually:**
@@ -287,6 +297,71 @@ else:
      - test_current (20% of fetched data, new distribution)
 5. **Decision**: Deploy/Reject/Skip based on double metrics
 6. **Audit**: Log all metrics to BigQuery `monitoring_audit.logs`
+
+### Post-Deployment: validate_new_champion Task
+
+**NEW TASK** (Added 2025-11-05): Addresses the **metrics staleness problem** after champion promotion.
+
+#### The Problem
+
+When a new model is promoted to champion, we face a critical observability issue:
+
+1. **validate_model** (task 3.2) runs **BEFORE** training and validates the **OLD champion**
+2. After promotion, BigQuery `monitoring_audit.logs` still contains the OLD champion's metrics
+3. Prometheus/Grafana read from BigQuery → dashboards show **stale metrics** for a model that's no longer in production
+4. Without re-validation, monitoring dashboards would display outdated performance (e.g., R²=0.5847 from old champion instead of R²=0.8167 from new champion)
+
+#### The Solution
+
+The `validate_new_champion` task validates the **NEW champion** after promotion and updates BigQuery with fresh metrics:
+
+**Execution Logic:**
+
+- **Conditional execution**: Only runs if `champion_promoted=True` (checked via XCom from `fine_tune_model`)
+- If no promotion occurred, task exits early with "⏭️ No champion promotion, skipping validation"
+- If promotion occurred, proceeds to validate the new champion
+
+**Validation Process:**
+
+1. Pulls new champion's `run_id` from XCom
+2. Queries BigQuery for predictions vs actuals (last 7 days) - same logic as `validate_model`
+3. Calculates RMSE, MAE, R² on production data
+4. Pushes metrics to XCom: `new_champion_rmse`, `new_champion_r2`, `new_champion_mae`
+5. Sends Discord notification (info level, not critical)
+
+**Integration with end_monitoring:**
+
+The `end_monitoring` task checks for these new metrics:
+
+```python
+# Check if we have new champion validation metrics
+new_champion_rmse = context["ti"].xcom_pull(
+    task_ids="validate_new_champion", key="new_champion_rmse"
+)
+new_champion_r2 = context["ti"].xcom_pull(
+    task_ids="validate_new_champion", key="new_champion_r2"
+)
+
+# If new champion was validated, use those metrics
+if new_champion_rmse is not None and new_champion_r2 is not None:
+    rmse = new_champion_rmse
+    r2 = new_champion_r2
+else:
+    # Use old champion metrics from validate_model
+    rmse = context["ti"].xcom_pull(task_ids="validate_model", key="rmse")
+    r2 = context["ti"].xcom_pull(task_ids="validate_model", key="r2")
+```
+
+This ensures BigQuery receives the **correct champion metrics**, which Prometheus then exposes to Grafana.
+
+**Impact:**
+
+- ✅ Grafana dashboards immediately reflect new champion's performance
+- ✅ Monitoring alerts trigger on actual production model metrics
+- ✅ Team has visibility into post-promotion model behavior
+- ✅ Audit trail tracks both pre- and post-promotion metrics
+
+For complete implementation details and example output, see [dags.md](./dags.md) section 3.5.
 
 ---
 
@@ -589,7 +664,7 @@ if force_fine_tune:
 #### Priority 1: REACTIVE (Critical Metrics)
 
 ```python
-if r2 < 0.65 or rmse > 60:
+if r2 < R2_CRITICAL or rmse > RMSE_THRESHOLD:
     return "fine_tune_model"
 ```
 
@@ -599,31 +674,31 @@ if r2 < 0.65 or rmse > 60:
 
 **Example scenario:**
 
-- R² = 0.42 (below critical threshold 0.45)
+- R² = 0.42 (below R2_CRITICAL threshold)
 - Drift = 40%
 - **Decision:** RETRAIN immediately
 
 #### Priority 2: PROACTIVE (High Drift + Declining)
 
 ```python
-if drift and drift_share >= 0.5 and r2 < 0.55:
+if drift and drift_share >= DRIFT_CRITICAL and r2 < R2_WARNING:
     return "fine_tune_model"
 ```
 
-**Trigger:** High drift (≥50%) + metrics declining
+**Trigger:** High drift (≥DRIFT_CRITICAL) + metrics declining below R2_WARNING
 **Action:** Preventive retraining
 **Rationale:** Catch degradation early before it becomes critical
 
 **Example scenario:**
 
-- R² = 0.68 (not critical yet, but declining)
-- Drift = 52% (critical level)
+- R² = 0.52 (below R2_WARNING, not critical yet, but declining)
+- Drift = 52% (≥DRIFT_CRITICAL level)
 - **Decision:** RETRAIN proactively to prevent further decline
 
 #### Priority 3: WAIT (Significant Drift but OK Metrics)
 
 ```python
-if drift and drift_share >= 0.3 and r2 >= 0.70:
+if drift and drift_share >= DRIFT_WARNING and r2 >= R2_WARNING:
     return "end_monitoring"
 ```
 
@@ -655,14 +730,14 @@ else:
 **Metrics:**
 
 - R² on production data: **0.72** ✅
-- RMSE: **32.25** ✅
+- RMSE: **78.30** ✅
 - Drift detected: **Yes** (50%) ⚠️
 - R² on test_baseline: 0.31 (not used for decision)
 
 **Analysis:**
 
 1. Champion R² (0.56) is **above warning threshold** (0.55) ✅
-2. RMSE (82.4) is **below threshold** (90) ✅
+2. RMSE (78.30) is **below threshold** (90) ✅
 3. Drift share (50%) is **at critical level** ⚠️
 4. But metrics are **still acceptable** on production data ✅
 

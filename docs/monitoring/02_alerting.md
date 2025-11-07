@@ -385,94 +385,44 @@ curl -s "http://localhost:3000/api/alertmanager/grafana/api/v2/alerts" \
 
 ---
 
-### Test 4: Simulate High RMSE
+### Test 4: Automated Testing Script
 
-**Method**: Temporarily modify threshold in rules.yml
-
-```yaml
-# Edit monitoring/grafana/provisioning/alerting/rules.yml
-# Change RMSE threshold from 70 to 60
-
-                - evaluator:
-                    params:
-                      - 60  # Lower threshold to trigger alert
-                    type: gt
-```
+**Recommended**: Use the automated test script for comprehensive validation of Grafana dashboards and alerting.
 
 ```bash
-# Restart Grafana
-docker compose --profile monitoring restart grafana
+# Run comprehensive Grafana tests
+python scripts/test_grafana_alerts_and_dashboards.py
 
-# Wait 5 minutes for evaluation
-# Check Prometheus alert state
-curl -s http://localhost:9090/api/v1/alerts | grep model_rmse_high
-
-# Revert threshold back to 70
+# Test specific components
+python scripts/test_grafana_alerts_and_dashboards.py --test-dashboards
+python scripts/test_grafana_alerts_and_dashboards.py --test-alerts
+python scripts/test_grafana_alerts_and_dashboards.py --test-metrics
 ```
 
----
+**Script Location**: [scripts/test_grafana_alerts_and_dashboards.py](../../scripts/test_grafana_alerts_and_dashboards.py)
 
-## 📸 Screenshots
+**What it tests**:
+- ✅ All 4 dashboards are provisioned and accessible
+- ✅ All 9 alert rules are loaded correctly
+- ✅ Contact point (Discord webhook) is configured
+- ✅ Notification policies are active
+- ✅ Prometheus data source is connected
+- ✅ Key metrics are being scraped (bike_model_r2_champion_current, etc.)
 
-> **👉 Add your screenshots here**
+**Example output**:
+```text
+✅ Grafana is reachable
+✅ Found 4 dashboards (expected 4)
+✅ Found 9 alert rules (expected 9)
+✅ Contact point 'discord-mlops' configured
+✅ Notification policy active
+✅ Prometheus datasource connected
+✅ 12/12 critical metrics available
 
-Create the following screenshots and save them to `docs/monitoring/screenshots/`:
-
-### Required Screenshots
-
-#### 1. `grafana_alert_rules_list.png`
-
-- **Path**: Grafana → Alerting → Alert Rules
-- **Show**: All 9 alert rules with state (Normal/Firing)
-- **Highlight**: No obsolete rules (prediction_latency, training_failure removed)
-
-#### 2. `grafana_alert_rules_detail.png`
-
-- **Path**: Click on one alert rule (e.g., "Model R² Critically Low")
-- **Show**: Query, thresholds, noDataState configuration
-
-#### 3. `discord_alert_critical.png`
-
-- **Show**: Example of CRITICAL alert in Discord
-- **Content**: Service Down or Model R² Critically Low
-- **Highlight**: Red color, severity level, actionable description
-
-#### 4. `discord_alert_warning.png`
-
-- **Show**: Example of WARNING alert
-- **Content**: High Drift Detected or Model R² Declining
-- **Highlight**: Orange color, less urgent
-
-#### 5. `grafana_contact_points.png`
-
-- **Path**: Grafana → Alerting → Contact points
-- **Show**: discord-mlops contact point configured
-- **Highlight**: Test button, last delivery status
-
-#### 6. `grafana_notification_policies.png`
-
-- **Path**: Grafana → Alerting → Notification policies
-- **Show**: Routing tree with repeat intervals
-
----
-
-### Screenshot Embedding
-
-Once you've added screenshots, reference them like this:
-
-```markdown
-### Alert Rules Overview
-
-![Grafana Alert Rules](./screenshots/grafana_alert_rules_list.png)
-
-*Figure 1: All 9 alert rules in Grafana (post-cleanup)*
-
-### Discord Notifications
-
-![Critical Alert in Discord](./screenshots/discord_alert_critical.png)
-
-*Figure 2: Example of CRITICAL alert sent to Discord #mlops-alerts channel*
+🎉 All tests passed!
 ```
+
+For detailed testing procedures, see the script documentation.
 
 ---
 

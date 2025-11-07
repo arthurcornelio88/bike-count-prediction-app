@@ -45,6 +45,23 @@ curl http://localhost:9090/api/v1/targets | jq '.data.activeTargets[] | {job: .l
 
 ## 🏗️ Architecture Overview
 
+### Quick Testing
+
+**Automated Tests**: Validate the entire monitoring stack with a single command:
+
+```bash
+# Test all monitoring components (dashboards, alerts, metrics)
+python scripts/test_grafana_alerts_and_dashboards.py
+```
+
+See [02_alerting.md](./02_alerting.md#test-4-automated-testing-script) for detailed testing procedures.
+
+**Pushgateway**: Available at `localhost:9091` for manual metrics pushing during development/testing. Not used in production flow (Prometheus scrapes directly from exporters).
+
+**Note**: For complete metrics catalog with descriptions and labels, see [03_metrics_reference.md](./03_metrics_reference.md).
+
+---
+
 ### Component Diagram
 
 ```text
@@ -66,16 +83,24 @@ curl http://localhost:9090/api/v1/targets | jq '.data.activeTargets[] | {job: .l
 │                    └────────┬─────────┘                         │
 └─────────────────────────────┼─────────────────────────────────┘
                               │
-         ┌────────────────────┼────────────────────┐
-         │                    │                    │
-┌────────▼─────────┐  ┌───────▼────────┐  ┌───────▼────────┐
-│  Prometheus      │  │  FastAPI       │  │  Prometheus    │
-│  Scraper         │  │  :8000/metrics │  │  Self-Monitor  │
-│  (15s interval)  │  │  (HTTP only)   │  │  :9090         │
-└────────┬─────────┘  └────────────────┘  └────────────────┘
-         │
-         │ Stores time-series data (15 days retention)
-         │
+         ┌────────────────────┼────────────────────┬──────────────┐
+         │                    │                    │              │
+┌────────▼─────────┐  ┌───────▼────────┐  ┌───────▼────────┐    │
+│  Prometheus      │  │  FastAPI       │  │  Prometheus    │    │
+│  Scraper         │  │  :8000/metrics │  │  Self-Monitor  │    │
+│  (15s interval)  │  │  (HTTP only)   │  │  :9090         │    │
+└────────┬─────────┘  └────────────────┘  └────────────────┘    │
+         │                                                        │
+         │ ┌──────────────────────────────────────────────────┐  │
+         │ │   Manual Push (dev/testing only)                 │  │
+         │ │   ┌────────────────────┐                         │  │
+         └─┼───│   Pushgateway      │◄────────────────────────┘
+           │   │   :9091            │   (Optional: manual metrics)
+           │   │   (test/dev)       │
+           │   └────────────────────┘
+           │
+           │ Stores time-series data (15 days retention)
+           │
 ┌────────▼──────────────────────────────────────────────────┐
 │                    PROMETHEUS TSDB                        │
 │  • bike_model_r2_champion_current                         │
@@ -109,57 +134,22 @@ curl http://localhost:9090/api/v1/targets | jq '.data.activeTargets[] | {job: .l
 
 ## 📊 Metrics Sources
 
-### 1. Airflow Exporter (Primary Source)
+The monitoring stack collects metrics from two main sources:
 
-**Purpose**: Expose business metrics from MLOps pipeline
-**Source**: BigQuery audit logs (primary) + Airflow XCom (fallback)
-**Port**: 9101
-**Scrape Interval**: 30s
-**Collection Interval**: 60s (internal cache)
+### 1. Airflow Exporter (Primary - Business Metrics)
+- **Port**: 9101
+- **Purpose**: MLOps business metrics (model performance, drift, training, predictions)
+- **Source**: BigQuery audit logs + Airflow API
+- **Metrics**: 16 business metrics (`bike_*`, `airflow_*`)
+- **Implementation**: `monitoring/custom_exporters/airflow_exporter.py`
 
-**Metrics Exposed** (16 total):
+### 2. FastAPI (Secondary - HTTP Metrics)
+- **Port**: 8000/metrics
+- **Purpose**: API health monitoring (requests, latency, errors)
+- **Metrics**: 3 HTTP metrics (`fastapi_*`)
+- **Implementation**: `backend/regmodel/app/middleware/prometheus_metrics.py`
 
-| Category | Metric | Type | Description |
-|----------|--------|------|-------------|
-| **Model Performance** | `bike_model_r2_production` | Gauge | Production R² score (0-1) |
-| | `bike_model_rmse_production` | Gauge | Production RMSE |
-| **Data Drift** | `bike_drift_detected` | Gauge | Drift flag (0/1) |
-| | `bike_drift_share` | Gauge | Drift share (0.0-1.0) |
-| | `bike_drifted_features_count` | Gauge | Count of drifted features |
-| **Training** | `bike_training_runs_total` | Counter | Training runs by status |
-| | `bike_model_improvement_delta` | Gauge | R² improvement (new - old) |
-| | `bike_model_deployments_total` | Counter | Deployments by decision |
-| **Ingestion** | `bike_records_ingested_total` | Gauge | Records ingested (DAG 1) |
-| **Predictions** | `bike_predictions_generated_total` | Gauge | Predictions count (DAG 2) |
-| | `bike_prediction_r2` | Gauge | Prediction R² |
-| | `bike_prediction_rmse` | Gauge | Prediction RMSE |
-| | `bike_prediction_mae` | Gauge | Prediction MAE |
-| **Airflow** | `airflow_dag_run_duration_seconds` | Histogram | DAG execution time |
-| | `airflow_task_duration_seconds` | Histogram | Task execution time |
-| | `airflow_dag_runs_total` | Counter | Total DAG runs by state |
-
-**Implementation**: `monitoring/custom_exporters/airflow_exporter.py`
-
----
-
-### 2. FastAPI Metrics (HTTP Monitoring Only)
-
-**Purpose**: Monitor API health (requests, latency, errors)
-**Port**: 8000
-**Scrape Interval**: 10s
-
-**Metrics Exposed** (3 total):
-
-| Metric | Type | Labels | Description |
-|--------|------|--------|-------------|
-| `fastapi_requests_total` | Counter | method, endpoint, status_code | Total HTTP requests |
-| `fastapi_request_duration_seconds` | Histogram | method, endpoint | Request latency |
-| `fastapi_errors_total` | Counter | method, endpoint | HTTP 5xx errors |
-
-**Implementation**: `backend/regmodel/app/middleware/prometheus_metrics.py`
-
-**Note**: Business metrics (predictions, training, drift) were **removed** from FastAPI.
-Airflow Exporter is the single source for these.
+**Complete metrics catalog**: See [03_metrics_reference.md](./03_metrics_reference.md) for detailed inventory with types, labels, and usage.
 
 ---
 

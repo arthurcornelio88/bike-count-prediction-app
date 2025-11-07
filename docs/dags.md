@@ -458,20 +458,20 @@ BranchPythonOperator applying **Hybrid Drift Management Strategy** (combining pr
 **Decision Logic (Priority Order):**
 
 1. **Force flag** (`dag_run.conf.force_fine_tune`): Overrides all logic for testing
-2. **REACTIVE trigger** (R² < 0.65 OR RMSE > 60): Immediate retraining when metrics are critically poor
-3. **PROACTIVE trigger** (drift ≥ 50% AND R² < 0.70): Preventive retraining when high drift + metrics declining
-4. **WAIT** (drift ≥ 30% BUT R² ≥ 0.70): Monitor closely, no retraining yet (model handles drift via `handle_unknown='ignore'`)
+2. **REACTIVE trigger** (R² < 0.45 OR RMSE > 90): Immediate retraining when metrics are critically poor
+3. **PROACTIVE trigger** (drift ≥ 50% AND R² < 0.55): Preventive retraining when high drift + metrics declining
+4. **WAIT** (drift ≥ 30% BUT R² ≥ 0.55): Monitor closely, no retraining yet (model handles drift via `handle_unknown='ignore'`)
 5. **ALL GOOD** (drift < 30% AND good metrics): Continue monitoring, no action
 
 **Thresholds:**
 
-These thresholds are configurable (for example, via a .env file) and should be tuned to reflect real production behavior, monitoring objectives, and operational constraints.
+These thresholds are configurable (for example, via a .env file) and should be tuned to reflect real production behavior, monitoring objectives, and operational constraints. Thresholds were adjusted on 2025-11-05 based on production data distribution analysis (see [training_strategy.md](training_strategy.md) for detailed rationale).
 
-Example:
+Current production thresholds:
 
-- R² critical: 0.65 (below = immediate retrain)
-- R² warning: 0.70 (below + high drift = proactive retrain)
-- RMSE threshold: 60.0
+- R² critical: 0.45 (below = immediate retrain)
+- R² warning: 0.55 (below + high drift = proactive retrain)
+- RMSE threshold: 90.0
 - Drift critical: 50% (high drift)
 - Drift warning: 30% (moderate drift)
 

@@ -13,28 +13,6 @@ All dashboards use template variable `$instance` to switch between:
 
 Switch data source via dropdown at top of each dashboard.
 
-## Testing Alerts & Dashboards
-
-![Testing alerts](/docs/img/test_alerting_terminal.png)
-
-Use `scripts/test_grafana_alerts_and_dashboard.py` to inject mock metrics via Pushgateway:
-
-```bash
-# Inject all test scenarios
-python scripts/test_grafana_alerts_and_dashboard.py
-
-# Inject specific test (e.g., high drift)
-python scripts/test_grafana_alerts_and_dashboard.py --test drift
-
-# Restore normal (delete test metrics)
-python scripts/test_grafana_alerts_and_dashboard.py --test restore
-```
-
-**Important**: Test script uses `job="test-metrics"` and `instance="pushgateway-test:9091"` to avoid
-conflicting with production metrics from airflow-exporter.
-
-See [TESTING_ALERTS.md](./TESTING_ALERTS.md) for full details.
-
 ---
 
 ## Dashboard 1: MLOps - System Overview
@@ -48,8 +26,8 @@ See [TESTING_ALERTS.md](./TESTING_ALERTS.md) for full details.
 | Panel | Metric | Threshold | Purpose |
 |-------|--------|-----------|---------|
 | Drift Detected | `bike_drift_detected{instance="$instance"}` | 0=ok, 1=drift | Binary drift indicator (gauge) |
-| Drift Share (%) | `bike_drift_share{instance="$instance"} * 100` | <30% ok, >50% critical | % of drifted features (gauge) |
-| Champion R² (test_current) | `bike_model_r2_champion_current{instance="$instance"}` | >0.70 ideal, <0.65 alert | Current model health (gauge) |
+| Drift Share (%) | `bike_drift_share{instance="$instance"} * 100` | <DRIFT_WARNING ok, >DRIFT_CRITICAL alert | % of drifted features (gauge) |
+| Champion R² (test_current) | `bike_model_r2_champion_current{instance="$instance"}` | >0.70 ideal, <R2_WARNING, <R2_CRITICAL | Current model health (gauge) |
 | Services Status | `up{job="airflow-metrics"}` (+ FastAPI, Prometheus) | 1=UP | Service availability (timeseries) |
 | API Request Rate (req/sec) | `rate(fastapi_requests_total[5m])` | ~0.1 req/s | Load per endpoint (timeseries) |
 | API Error Rate (%) | `100 * sum(rate(fastapi_errors_total[5m])) / sum(rate(...))` | >5% critical | 5xx error % (timeseries) |
@@ -58,7 +36,7 @@ See [TESTING_ALERTS.md](./TESTING_ALERTS.md) for full details.
 | Drifted Features | `bike_drifted_features_count{instance="$instance"}` | Monitor trend | Count of drifted features (stat) |
 | Production RMSE | `bike_model_rmse_production{instance="$instance"}` | Sudden rise=drift | Absolute error of champion (stat) |
 
-**Quick health check**: All services UP, R²≥0.70, drift<30%, API error rate=0.
+**Quick health check**: All services UP, R²≥R2_CRITICAL, drift<DRIFT_WARNING, API error rate=0.
 
 ---
 
@@ -73,7 +51,7 @@ See [TESTING_ALERTS.md](./TESTING_ALERTS.md) for full details.
 | Panel | Metrics | Purpose |
 |-------|---------|---------|
 | R² Trend - test_current | `bike_model_r2_champion_current`, `bike_model_r2_challenger_current` | Compare models on recent data; challenger must beat champion for deploy |
-| R² Trend - test_baseline | `bike_model_r2_champion_baseline`, `bike_model_r2_challenger_baseline` | Detect regression against reference set; challenger<0.60 → reject |
+| R² Trend - test_baseline | `bike_model_r2_champion_baseline`, `bike_model_r2_challenger_baseline` | Detect regression against reference set; challenger<BASELINE_R2_THRESHOLD → reject |
 | RMSE Trend | `bike_model_rmse_production`, `bike_prediction_rmse` | Champion (weekly validation) vs daily predictions RMSE |
 | MAE Trend | `bike_prediction_mae` | Daily predictions MAE for historical comparison |
 | Model Improvement Delta | `bike_model_improvement_delta` | R² gain (green=improvement, red=regression) |
@@ -89,9 +67,10 @@ See [TESTING_ALERTS.md](./TESTING_ALERTS.md) for full details.
 
 **Quick read**:
 
-- Champion_current <0.70 → anticipate retraining
+- Champion_current <R2_CRITICAL → immediate retraining required
+- Champion_current <R2_WARNING + high drift (≥DRIFT_CRITICAL) → proactive retraining
 - Challenger_current > Champion_current +0.02 → likely deployment
-- Challenger_baseline < Champion_baseline → regression; check features
+- Challenger_baseline < BASELINE_R2_THRESHOLD → regression; reject deployment
 - Exploding RMSE/MAE → suspect corrupted data
 
 ---
@@ -106,14 +85,14 @@ See [TESTING_ALERTS.md](./TESTING_ALERTS.md) for full details.
 
 | Panel | Metric | Threshold | Purpose |
 |-------|--------|-----------|---------|
-| Data Drift Over Time | `bike_drift_share{instance="$instance"} * 100` | <30% ok, >50% critical | Drift % evolution (timeseries) |
+| Data Drift Over Time | `bike_drift_share{instance="$instance"} * 100` | <DRIFT_WARNING ok, >DRIFT_CRITICAL alert | Drift % evolution (timeseries) |
 | Drift Status | `bike_drift_detected{instance="$instance"}` | 0=NO, 1=YES | Current drift state (gauge) |
 | Drifted Features Count | `bike_drifted_features_count{instance="$instance"}` | Monitor trend | Number of features with drift (timeseries) |
 | Current Drift Share | `bike_drift_share{instance="$instance"} * 100` | 0-100% | Current drift percentage (gauge) |
 | R² vs Drift Correlation | `bike_model_r2_champion_current` vs `bike_drift_share` | See correlation | How drift affects model (timeseries) |
 | Summary Statistics | `bike_drifted_features_count{instance="$instance"}` | Info panel | Latest drift metrics (stat) |
 
-**Usage**: Track data drift and its impact on model quality. Drift >50% + R² declining → retrain urgently.
+**Usage**: Track data drift and its impact on model quality. Drift ≥DRIFT_CRITICAL + R²<R2_WARNING → proactive retrain.
 
 ---
 
@@ -140,7 +119,7 @@ See [TESTING_ALERTS.md](./TESTING_ALERTS.md) for full details.
 
 **Quick read**:
 
-- Training success <90% → check Airflow logs (`task retrain_model`)
+- Training success <90% → check Airflow logs (`task fine_tune_model`)
 - Too many `reject` → challenger no longer meets thresholds; re-evaluate features
 - No `deploy` for long time + drift rising → escalate
 
@@ -264,15 +243,30 @@ bike_model_deployments_total{decision="reject"}
 
 ---
 
+## Threshold Reference
+
+| Variable | Value | Purpose |
+|----------|-------|---------|
+| `R2_CRITICAL` | 0.45 | Below this → immediate retrain (reactive) |
+| `R2_WARNING` | 0.55 | Below this + high drift → proactive retrain |
+| `RMSE_THRESHOLD` | 90.0 | Above this → immediate retrain |
+| `DRIFT_CRITICAL` | 50% (0.5) | High drift level |
+| `DRIFT_WARNING` | 30% (0.3) | Moderate drift level |
+| `BASELINE_R2_THRESHOLD` | 0.60 | Minimum R² on test_baseline to avoid regression |
+
+**Note**: Thresholds adjusted 2025-11-05 based on production data analysis. See [training_strategy.md](../training_strategy.md) for detailed rationale.
+
+---
+
 ## On-Call Checklist
 
 1. All services `up` = 1
-2. `bike_model_r2_champion_current` ≥0.70 and stable
-3. `bike_drift_share` <30%
+2. `bike_model_r2_champion_current` ≥R2_CRITICAL and stable
+3. `bike_drift_share` <DRIFT_WARNING
 4. Latest trainings successful and at least one recent `deploy`/`skip` decision
 5. API latency P50 <50ms and zero error rate
 
 ---
 
 **Maintainer**: Arthur Cornélio
-**Last update**: 2025-11-05
+**Last update**: 2025-11-07

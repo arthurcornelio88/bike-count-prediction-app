@@ -164,30 +164,40 @@ times but from the same origin. This ensures:
 
 ---
 
-## 🔄 MLOps Workflow
+## 🔄 DataOps Workflow
 
 ### Daily Operations
 
-```mermaid
-graph LR
-    A[Paris Open Data API] -->|fetch 100 records| B[BigQuery daily_YYYYMMDD]
-    B --> C[Load Champion Model]
-    C --> D[Generate Predictions]
-    D --> E[Store in BQ predictions table]
-```
-
-### Weekly Monitoring
+**Complete Daily Pipeline** (DAG 1 → DAG 2):
 
 ```mermaid
 graph TB
-    A[Aggregate last 7 days] --> B{Drift Detected?}
-    B -->|No| C[Keep Champion]
-    B -->|Yes| D[Fine-tune on last 30 days]
-    D --> E[Evaluate on Test Set]
-    E --> F{Better than Champion?}
-    F -->|Yes| G[Promote New Model]
-    F -->|No| C
+    subgraph "DAG 1: Data Ingestion (06:00 UTC)"
+        A[Paris Open Data API] -->|fetch up to 1000 records| B[Deduplication Logic]
+        B -->|filter existing records| C[BigQuery comptage_velo]
+        C -->|validate ingestion| D[Validation Task]
+    end
+
+    subgraph "DAG 2: Predictions (07:00 UTC)"
+        D -->|trigger after ingestion| E[Check Raw Data]
+        E -->|query last 48h| F[Transform for API]
+        F -->|POST /predict| G[Champion Model]
+        G -->|predictions + metadata| H[BigQuery predictions.daily_YYYYMMDD]
+        H -->|validate count + metrics| I[Validation Task]
+        I -->|send Discord alert| J[Monitoring]
+    end
+
+    subgraph "Model Loading"
+        K[GCS summary.json] -->|get champion run_id| G
+        L[MLflow Server] -->|load model artifacts| G
+    end
 ```
+
+**Key Flow Details:**
+
+1. **DAG 1 (06:00)**: Fetches fresh data, deduplicates against existing records, stores in partitioned table
+2. **DAG 2 (07:00)**: Runs 1h after ingestion, queries last 48h window, generates predictions with current champion
+3. **Champion Tracking**: Every prediction tagged with `model_version` (MLflow run_id) for full traceability
 
 ---
 
@@ -258,60 +268,6 @@ PROJECT: datascientest-460618
 
 ---
 
-## 🔗 References
-
-### Scripts
-
-- [scripts/audit_temporal_continuity.py](../scripts/audit_temporal_continuity.py) - Initial continuity audit
-- [scripts/validate_overlap_data_quality.py](../scripts/validate_overlap_data_quality.py) - Data quality validation
-- [scripts/test_dag_fetch.py](../scripts/test_dag_fetch.py) - DAG parameter testing
-
-### Documentation
-
-- [docs/temporal_continuity_audit.json](temporal_continuity_audit.json) - Initial audit results
-- [docs/overlap_data_quality_validation.json](overlap_data_quality_validation.json) - Quality validation
-- [docs/bigquery_setup.md](bigquery_setup.md) - BigQuery configuration guide
-- [docs/dvc.md](dvc.md) - DVC data versioning
-
-### DAGs
-
-- [dags/dag_daily_fetch_data.py](../dags/dag_daily_fetch_data.py) - Daily API ingestion
-- [dags/dag_daily_prediction.py](../dags/dag_daily_prediction.py) - Daily predictions
-- [dags/dag_monitor_and_train.py](../dags/dag_monitor_and_train.py) - Weekly monitoring + fine-tuning
-
----
-
-## ✅ Success Metrics
-
-### Data Quality
-
-| Metric | Target | Current |
-|--------|--------|---------|
-| Records with count > 0 | > 90% | ✅ 94.8% |
-| Unique counters | > 100 | ✅ 108 |
-| Temporal coverage | No gaps | ✅ Continuous |
-| Data freshness | ≤ 1 day | ✅ 0 days |
-
-### Model Performance (Baseline to Beat)
-
-| Metric | Target |
-|--------|--------|
-| MAE | < 15 |
-| RMSE | < 25 |
-| R² | > 0.85 |
-| Training time | < 10 min |
-
-### Pipeline Health
-
-| Metric | Target |
-|--------|--------|
-| DAG success rate | > 95% |
-| API fetch success | > 98% |
-| Prediction latency | < 5s |
-| Drift detection frequency | Weekly |
-
----
-
-**Date**: 2025-10-11
+**Date**: 2025-11-06
 **Version**: 2.0
 **Status**: ✅ Strategy finalized based on data quality analysis
