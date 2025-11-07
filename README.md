@@ -10,6 +10,10 @@
 
 ---
 
+## 🎥 Vidéo demo
+
+[Watch a 4‑minute demo of the complete MLOps pipeline on Vimeo](https://vimeo.com/1134350951)
+
 ## 🚀 Quick Start
 
 ### Local Development (All Services)
@@ -106,6 +110,7 @@ docker exec airflow-webserver airflow dags trigger monitor_and_fine_tune \
 
 **Monitoring Stack** (`--profile monitoring`):
 - `prometheus` (port 9090) - Metrics collection
+- `pushgateway` (port 9091:9091) - For testing metrics collection
 - `grafana` (port 3000) - 4 dashboards (overview, performance, drift, training)
 - `airflow-exporter` (port 9101) - Custom MLOps metrics
 
@@ -113,6 +118,10 @@ docker exec airflow-webserver airflow dags trigger monitor_and_fine_tune \
 - `postgres-airflow` - Airflow metadata DB
 - `redis-airflow` - Celery broker
 - `flower` (port 5555) - Celery monitoring
+
+**High quality schema, for zoomed view**:
+
+![Architecture](/docs/img/architecture.png)
 
 ---
 
@@ -239,7 +248,6 @@ AIRFLOW_GID=50000
 **Security Notes:**
 - ⚠️ `.env` contains secrets - NEVER commit to Git (already in `.gitignore`)
 - 🔐 For production: Use GCP Secret Manager (see [docs/secrets.md](docs/secrets.md))
-- 📝 Legacy file `.env.airflow` can be deleted (all vars moved to `.env`)
 
 ### 2. Clone & Install
 
@@ -419,6 +427,9 @@ See [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) for video presentation guide:
 - [docs/training_strategy.md](docs/training_strategy.md) - Sliding window + drift management
 - [docs/architecture.md](docs/architecture.md) - MLflow & model registry
 - [docs/dags.md](docs/dags.md) - Airflow DAG reference (3 DAGs)
+
+### Infrastructure
+- [docs/INFRASTRUCTURE.md](docs/INFRASTRUCTURE.md) - Complete infrastructure documentation (Docker services, GCP, external APIs)
 
 ### Setup Guides
 - [docs/mlflow_cloudsql.md](docs/mlflow_cloudsql.md) - MLflow Cloud SQL setup

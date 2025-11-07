@@ -495,14 +495,17 @@ def train_rf(X, y, env, test_mode, data_source="reference", current_data_df=None
         mlflow.log_param("rf_n_estimators", rf.model.n_estimators)
         mlflow.log_param("rf_max_depth", rf.model.max_depth)
 
-        y_pred = rf.predict(X)
-        rmse = np.sqrt(mean_squared_error(y, y_pred))
-        r2 = r2_score(y, y_pred)
+        # Calculate training metrics on ACTUAL training data (X_train_final)
+        y_pred_train = rf.predict(X_train_final)
+        rmse = np.sqrt(mean_squared_error(y_train_final, y_pred_train))
+        r2 = r2_score(y_train_final, y_pred_train)
 
         mlflow.log_metric("rf_rmse_train", rmse)
         mlflow.log_metric("rf_r2_train", r2)
 
-        print(f"🎯 RF – RMSE : {rmse:.2f} | R² : {r2:.4f}")
+        print(
+            f"🎯 RF Training Metrics (on {len(X_train_final):,} samples) – RMSE: {rmse:.2f} | R²: {r2:.4f}"
+        )
 
         # NEW: Double evaluation if current_data provided
         double_eval_results = None
@@ -657,6 +660,7 @@ def train_nn(X, y, env, test_mode, data_source="reference", current_data_df=None
         total_params = nn.model.count_params()
         mlflow.log_metric("nn_total_params", total_params)
 
+        # Calculate training metrics on training data
         y_pred = nn.predict(X).flatten()
         rmse = np.sqrt(mean_squared_error(y, y_pred))
         r2 = r2_score(y, y_pred)
@@ -664,7 +668,9 @@ def train_nn(X, y, env, test_mode, data_source="reference", current_data_df=None
         mlflow.log_metric("nn_rmse_train", rmse)
         mlflow.log_metric("nn_r2_train", r2)
 
-        print(f"🎯 NN – RMSE : {rmse:.2f} | R² : {r2:.4f} | Params: {total_params}")
+        print(
+            f"🎯 NN Training Metrics (on {len(X):,} samples) – RMSE: {rmse:.2f} | R²: {r2:.4f} | Params: {total_params}"
+        )
 
         # NEW: Double evaluation if current_data provided
         double_eval_results = None
