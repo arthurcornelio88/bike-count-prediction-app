@@ -11,7 +11,7 @@
 
 **All Phases Complete** ✅
 
-- ✅ ML models trained (RF, NN, RF Classifier)
+- ✅ ML models trained (RF, NN)
 - ✅ MLflow tracking + Cloud SQL backend
 - ✅ Custom model registry (`summary.json` on GCS)
 - ✅ FastAPI backend with training API
@@ -29,7 +29,7 @@
 
 ### Deliverables
 
-- ML pipelines with custom transformers (RFPipeline, NNPipeline, AffluenceClassifierPipeline)
+- ML pipelines with custom transformers (RFPipeline, NNPipeline)
 - MLflow tracking (local dev + Cloud SQL prod backend)
 - Custom model registry via `summary.json` on GCS
 - FastAPI backend deployed on Cloud Run
@@ -39,7 +39,7 @@
 
 ### Key Achievements
 
-- **Models**: Random Forest (R²≈0.79), Neural Network (R²≈0.72), RF Classifier
+- **Models**: Random Forest (R²≈0.79), Neural Network (R²≈0.72)
 - **MLflow Integration**: Centralized tracking with Cloud SQL PostgreSQL backend
 - **Artifact Storage**: GCS bucket (`gs://df_traffic_cyclist1/mlflow-artifacts/`)
 - **Model Registry**: Append-only `summary.json` for programmatic access
@@ -97,8 +97,7 @@
 - DVC dataset support (baseline/current/reference)
 - Automatic GCS upload + `summary.json` update
 
-**Supported Models**: `rf` (Random Forest), `nn` (Neural Network), `rf_class` (Classifier)
-
+**Supported Models**: `rf` (Random Forest), `nn` (Neural Network)
 **Architecture**:
 
 ```text
@@ -490,6 +489,6 @@ curl -X POST "http://localhost:8000/train" \
 
 ---
 
-**Maintainer**: Arthur Cornélio
-**Last Updated**: 2025-11-05
+**Maintainer**: Arthur Cornélio & Bruno (^^)
+**Last Updated**: 2025-11-06
 **Version**: 5.0 (Champion Tracking Complete)
